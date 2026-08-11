@@ -1,7 +1,10 @@
 import { SymbolView } from 'expo-symbols';
+import { useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -50,6 +53,23 @@ const quickActions: Array<{
 ];
 
 export default function HomeScreen() {
+  const router = useRouter();
+  const { appointment, loading } = useAppointment();
+
+  function openQuickAction(label: string) {
+    if (label === 'Book') {
+      router.push('/explore');
+      return;
+    }
+
+    if (label === 'Visit history') {
+      router.push({ pathname: '/journey', params: { tab: 'past' } });
+      return;
+    }
+
+    router.push('/journey');
+  }
+
   return (
     <View style={styles.screen}>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
@@ -72,54 +92,11 @@ export default function HomeScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.appointmentCard}>
-            <View style={styles.appointmentGlow} />
-            <View style={styles.cardTopRow}>
-              <View style={styles.nextVisitPill}>
-                <View style={styles.pillDot} />
-                <Text style={styles.nextVisitText}>NEXT APPOINTMENT</Text>
-              </View>
-              <Text style={styles.appointmentDay}>TODAY</Text>
-            </View>
-
-            <Text style={styles.doctorName}>Dr. Sarah Lim</Text>
-            <Text style={styles.specialty}>Family Medicine · Novena Medical</Text>
-
-            <View style={styles.appointmentDetails}>
-              <View style={styles.detailItem}>
-                <Icon
-                  name={{ ios: 'calendar', android: 'calendar_month', web: 'calendar_month' }}
-                  color="#D8F6ED"
-                  size={18}
-                />
-                <Text style={styles.detailText}>12 Aug</Text>
-              </View>
-              <View style={styles.detailDivider} />
-              <View style={styles.detailItem}>
-                <Icon
-                  name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
-                  color="#D8F6ED"
-                  size={18}
-                />
-                <Text style={styles.detailText}>10:30 AM</Text>
-              </View>
-            </View>
-
-            <View style={styles.queuePanel}>
-              <View>
-                <Text style={styles.queueLabel}>ESTIMATED WAIT</Text>
-                <Text style={styles.queueValue}>12–18 minutes</Text>
-              </View>
-              <Pressable accessibilityRole="button" style={styles.checkInButton}>
-                <Text style={styles.checkInText}>Check in</Text>
-                <Icon
-                  name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }}
-                  color={colors.tealDark}
-                  size={17}
-                />
-              </Pressable>
-            </View>
-          </View>
+          {loading && <AppointmentLoadingCard />}
+          {!loading && appointment && (
+            <HomeAppointmentCard appointment={appointment} onCheckIn={() => router.push('/journey')} />
+          )}
+          {!loading && !appointment && <EmptyAppointmentCard onBook={() => router.push('/explore')} />}
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>How can we help?</Text>
@@ -127,7 +104,11 @@ export default function HomeScreen() {
 
           <View style={styles.quickActionRow}>
             {quickActions.map((action) => (
-              <Pressable key={action.label} style={styles.quickAction}>
+              <Pressable
+                accessibilityRole="button"
+                key={action.label}
+                onPress={() => openQuickAction(action.label)}
+                style={styles.quickAction}>
                 <View style={[styles.quickIcon, { backgroundColor: action.background }]}>
                   <Icon name={action.icon} color={action.color} size={23} />
                 </View>
@@ -138,12 +119,15 @@ export default function HomeScreen() {
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>Recent care</Text>
-            <Pressable>
+            <Pressable onPress={() => router.push({ pathname: '/journey', params: { tab: 'past' } })}>
               <Text style={styles.linkText}>View all</Text>
             </Pressable>
           </View>
 
-          <Pressable style={styles.historyCard}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.push({ pathname: '/journey', params: { tab: 'past' } })}
+            style={styles.historyCard}>
             <View style={styles.historyIcon}>
               <Icon
                 name={{ ios: 'cross.case.fill', android: 'medical_services', web: 'medical_services' }}
@@ -179,6 +163,94 @@ export default function HomeScreen() {
       </SafeAreaView>
     </View>
   );
+}
+
+function HomeAppointmentCard({ appointment, onCheckIn }: { appointment: Appointment; onCheckIn: () => void }) {
+  return (
+    <View style={styles.appointmentCard}>
+      <View style={styles.appointmentGlow} />
+      <View style={styles.cardTopRow}>
+        <View style={styles.nextVisitPill}>
+          <View style={styles.pillDot} />
+          <Text style={styles.nextVisitText}>NEXT APPOINTMENT</Text>
+        </View>
+        <Text style={styles.appointmentDay}>{getAppointmentDay(appointment.date)}</Text>
+      </View>
+
+      <Text style={styles.doctorName}>{appointment.doctorName}</Text>
+      <Text style={styles.specialty}>{appointment.specialty} · {appointment.clinicName}</Text>
+
+      <View style={styles.appointmentDetails}>
+        <View style={styles.detailItem}>
+          <Icon
+            name={{ ios: 'calendar', android: 'calendar_month', web: 'calendar_month' }}
+            color="#D8F6ED"
+            size={18}
+          />
+          <Text style={styles.detailText}>{formatHomeDate(appointment.date)}</Text>
+        </View>
+        <View style={styles.detailDivider} />
+        <View style={styles.detailItem}>
+          <Icon
+            name={{ ios: 'clock', android: 'schedule', web: 'schedule' }}
+            color="#D8F6ED"
+            size={18}
+          />
+          <Text style={styles.detailText}>{appointment.time}</Text>
+        </View>
+      </View>
+
+      <View style={styles.queuePanel}>
+        <View>
+          <Text style={styles.queueLabel}>ESTIMATED WAIT</Text>
+          <Text style={styles.queueValue}>{appointment.waitMinutes}–{appointment.waitMinutes + 6} minutes</Text>
+        </View>
+        <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.checkInButton}>
+          <Text style={styles.checkInText}>Check in</Text>
+          <Icon
+            name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }}
+            color={colors.tealDark}
+            size={17}
+          />
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+function AppointmentLoadingCard() {
+  return (
+    <View style={[styles.appointmentCard, styles.appointmentLoadingCard]}>
+      <View style={styles.appointmentLoadingPill} />
+      <View style={styles.appointmentLoadingTitle} />
+      <View style={styles.appointmentLoadingLine} />
+    </View>
+  );
+}
+
+function EmptyAppointmentCard({ onBook }: { onBook: () => void }) {
+  return (
+    <View style={styles.appointmentCard}>
+      <View style={styles.appointmentGlow} />
+      <View style={styles.emptyAppointmentIcon}>
+        <Icon name={{ ios: 'calendar.badge.plus', android: 'calendar_add_on', web: 'calendar_add_on' }} color="#E9FAF6" size={26} />
+      </View>
+      <Text style={styles.emptyAppointmentTitle}>No upcoming appointment</Text>
+      <Text style={styles.emptyAppointmentCaption}>Find a nearby clinic and choose a time that works for you.</Text>
+      <Pressable accessibilityRole="button" onPress={onBook} style={styles.emptyAppointmentButton}>
+        <Text style={styles.emptyAppointmentButtonText}>Book appointment</Text>
+        <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color={colors.tealDark} size={17} />
+      </Pressable>
+    </View>
+  );
+}
+
+function getAppointmentDay(date: string) {
+  return date.split(',')[0].toUpperCase();
+}
+
+function formatHomeDate(date: string) {
+  return date.replace(/^[^,]+,\s*/, '').replace(/\s+2026$/, '');
 }
 
 const styles = StyleSheet.create({
@@ -260,6 +332,15 @@ const styles = StyleSheet.create({
     backgroundColor: colors.teal,
     opacity: 0.6,
   },
+  appointmentLoadingCard: { minHeight: 260, backgroundColor: '#DDE9E7' },
+  appointmentLoadingPill: { width: 120, height: 26, borderRadius: 13, backgroundColor: '#C8DAD6' },
+  appointmentLoadingTitle: { width: '54%', height: 24, marginTop: 28, borderRadius: 12, backgroundColor: '#C8DAD6' },
+  appointmentLoadingLine: { width: '70%', height: 14, marginTop: 12, borderRadius: 7, backgroundColor: '#C8DAD6' },
+  emptyAppointmentIcon: { width: 54, height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: 'rgba(255,255,255,0.13)' },
+  emptyAppointmentTitle: { marginTop: 20, color: '#FFFFFF', fontSize: 21, fontWeight: '800' },
+  emptyAppointmentCaption: { maxWidth: 390, marginTop: 7, color: '#C8E5E1', fontSize: 12, lineHeight: 18 },
+  emptyAppointmentButton: { alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 20, paddingHorizontal: 15, paddingVertical: 12, borderRadius: 14, backgroundColor: '#E6F8F3' },
+  emptyAppointmentButtonText: { color: colors.tealDark, fontSize: 12, fontWeight: '800' },
   cardTopRow: {
     flexDirection: 'row',
     alignItems: 'center',

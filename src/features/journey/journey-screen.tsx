@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -48,9 +48,14 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 
 export function JourneyScreen() {
   const router = useRouter();
+  const { tab } = useLocalSearchParams<{ tab?: string }>();
   const { appointment, loading } = useAppointment();
-  const [activeTab, setActiveTab] = useState<JourneyTab>('current');
+  const [activeTab, setActiveTab] = useState<JourneyTab>(tab === 'past' ? 'past' : 'current');
   const [qrVisible, setQrVisible] = useState(false);
+
+  useEffect(() => {
+    setActiveTab(tab === 'past' ? 'past' : 'current');
+  }, [tab]);
 
   return (
     <View style={styles.screen}>
