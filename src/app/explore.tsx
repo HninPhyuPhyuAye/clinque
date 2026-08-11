@@ -1,5 +1,5 @@
 import { SymbolView } from 'expo-symbols';
-import type { ComponentProps } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -21,6 +21,14 @@ type Clinic = {
   accent: 'teal' | 'blue' | 'warm';
 };
 
+type BookingStage = 'details' | 'schedule' | 'review' | 'success';
+
+type BookingDraft = {
+  date: string;
+  time: string;
+  reason: string;
+};
+
 const colors = {
   background: '#F4F9F8',
   card: '#FFFFFF',
@@ -37,6 +45,25 @@ const colors = {
 } as const;
 
 const filters: ClinicFilter[] = ['Nearby', 'Open now', 'GP', 'Dental'];
+
+const appointmentDates = [
+  { day: 'WED', date: '12', value: 'Wed, 12 Aug 2026' },
+  { day: 'THU', date: '13', value: 'Thu, 13 Aug 2026' },
+  { day: 'FRI', date: '14', value: 'Fri, 14 Aug 2026' },
+  { day: 'SAT', date: '15', value: 'Sat, 15 Aug 2026' },
+  { day: 'MON', date: '17', value: 'Mon, 17 Aug 2026' },
+] as const;
+
+const appointmentTimes = [
+  { label: '9:00 AM', available: false },
+  { label: '9:40 AM', available: true },
+  { label: '10:20 AM', available: true },
+  { label: '11:10 AM', available: true },
+  { label: '11:40 AM', available: true },
+  { label: '2:10 PM', available: true },
+] as const;
+
+const visitReasons = ['General consultation', 'Health screening', 'Vaccination'] as const;
 
 const clinics: Clinic[] = [
   {
@@ -88,6 +115,8 @@ export default function ClinicsScreen() {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<ClinicFilter>('Nearby');
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
+  const [bookingStage, setBookingStage] = useState<BookingStage>('details');
+  const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
 
   const visibleClinics = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -103,8 +132,53 @@ export default function ClinicsScreen() {
     });
   }, [activeFilter, query]);
 
+  if (selectedClinic && bookingStage === 'schedule') {
+    return (
+      <BookingSchedule
+        clinic={selectedClinic}
+        initialDraft={bookingDraft}
+        onBack={() => setBookingStage('details')}
+        onContinue={(draft) => {
+          setBookingDraft(draft);
+          setBookingStage('review');
+        }}
+      />
+    );
+  }
+
+  if (selectedClinic && bookingStage === 'review' && bookingDraft) {
+    return (
+      <BookingReview
+        clinic={selectedClinic}
+        draft={bookingDraft}
+        onBack={() => setBookingStage('schedule')}
+        onConfirm={() => setBookingStage('success')}
+      />
+    );
+  }
+
+  if (selectedClinic && bookingStage === 'success' && bookingDraft) {
+    return (
+      <BookingSuccess
+        clinic={selectedClinic}
+        draft={bookingDraft}
+        onDone={() => {
+          setSelectedClinic(null);
+          setBookingDraft(null);
+          setBookingStage('details');
+        }}
+      />
+    );
+  }
+
   if (selectedClinic) {
-    return <ClinicDetail clinic={selectedClinic} onBack={() => setSelectedClinic(null)} />;
+    return (
+      <ClinicDetail
+        clinic={selectedClinic}
+        onBack={() => setSelectedClinic(null)}
+        onChooseTime={() => setBookingStage('schedule')}
+      />
+    );
   }
 
   return (
@@ -197,7 +271,14 @@ export default function ClinicsScreen() {
 
           <View style={styles.clinicList}>
             {visibleClinics.map((clinic) => (
-              <ClinicCard clinic={clinic} key={clinic.id} onSelect={() => setSelectedClinic(clinic)} />
+              <ClinicCard
+                clinic={clinic}
+                key={clinic.id}
+                onSelect={() => {
+                  setSelectedClinic(clinic);
+                  setBookingStage('details');
+                }}
+              />
             ))}
 
             {visibleClinics.length === 0 && (
@@ -276,7 +357,15 @@ function ClinicCard({ clinic, onSelect }: { clinic: Clinic; onSelect: () => void
   );
 }
 
-function ClinicDetail({ clinic, onBack }: { clinic: Clinic; onBack: () => void }) {
+function ClinicDetail({
+  clinic,
+  onBack,
+  onChooseTime,
+}: {
+  clinic: Clinic;
+  onBack: () => void;
+  onChooseTime: () => void;
+}) {
   const accent = getAccent(clinic.accent);
 
   return (
@@ -383,7 +472,7 @@ function ClinicDetail({ clinic, onBack }: { clinic: Clinic; onBack: () => void }
               <Text style={styles.nextAvailableLabel}>NEXT AVAILABLE</Text>
               <Text style={styles.nextAvailableTime}>{clinic.earliest}</Text>
             </View>
-            <Pressable accessibilityRole="button" style={styles.chooseTimeButton}>
+            <Pressable accessibilityRole="button" onPress={onChooseTime} style={styles.chooseTimeButton}>
               <Text style={styles.chooseTimeText}>Choose time</Text>
               <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={17} />
             </Pressable>
@@ -392,6 +481,339 @@ function ClinicDetail({ clinic, onBack }: { clinic: Clinic; onBack: () => void }
       </SafeAreaView>
     </View>
   );
+}
+
+function BookingSchedule({
+  clinic,
+  initialDraft,
+  onBack,
+  onContinue,
+}: {
+  clinic: Clinic;
+  initialDraft: BookingDraft | null;
+  onBack: () => void;
+  onContinue: (draft: BookingDraft) => void;
+}) {
+  const [date, setDate] = useState(initialDraft?.date ?? appointmentDates[1].value);
+  const [time, setTime] = useState(initialDraft?.time ?? '11:10 AM');
+  const [reason, setReason] = useState(initialDraft?.reason ?? 'General consultation');
+
+  return (
+    <BookingPage
+      actionLabel="Review appointment"
+      onAction={() => onContinue({ date, time, reason })}
+      onBack={onBack}
+      progress={1}
+      title="Choose a time">
+      <View style={styles.bookingDoctorCard}>
+        <View style={styles.bookingDoctorAvatar}>
+          <Text style={styles.doctorInitials}>SL</Text>
+        </View>
+        <View style={styles.bookingDoctorContent}>
+          <Text style={styles.bookingDoctorName}>Dr. Sarah Lim</Text>
+          <Text style={styles.bookingDoctorClinic}>{clinic.name}</Text>
+        </View>
+        <View style={styles.verifiedPill}>
+          <Icon name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} color={colors.teal} size={13} />
+          <Text style={styles.verifiedText}>Verified</Text>
+        </View>
+      </View>
+
+      <View style={styles.bookingSectionHeader}>
+        <Text style={styles.bookingSectionTitle}>Select date</Text>
+        <Text style={styles.bookingSectionMeta}>August 2026</Text>
+      </View>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.dateRow}>
+        {appointmentDates.map((item) => {
+          const selected = date === item.value;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              key={item.value}
+              onPress={() => setDate(item.value)}
+              style={[styles.dateButton, selected && styles.dateButtonActive]}>
+              <Text style={[styles.dateDay, selected && styles.dateTextActive]}>{item.day}</Text>
+              <Text style={[styles.dateNumber, selected && styles.dateTextActive]}>{item.date}</Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+
+      <View style={styles.bookingSectionHeader}>
+        <Text style={styles.bookingSectionTitle}>Available times</Text>
+        <Text style={styles.bookingSectionMeta}>GMT+8</Text>
+      </View>
+      <View style={styles.timeGrid}>
+        {appointmentTimes.map((item) => {
+          const selected = time === item.label;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !item.available, selected }}
+              disabled={!item.available}
+              key={item.label}
+              onPress={() => setTime(item.label)}
+              style={[
+                styles.timeButton,
+                selected && styles.timeButtonActive,
+                !item.available && styles.timeButtonUnavailable,
+              ]}>
+              <Text
+                style={[
+                  styles.timeText,
+                  selected && styles.timeTextActive,
+                  !item.available && styles.timeTextUnavailable,
+                ]}>
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.bookingSectionHeader}>
+        <Text style={styles.bookingSectionTitle}>Visit reason</Text>
+        <Text style={styles.requiredText}>REQUIRED</Text>
+      </View>
+      <View style={styles.reasonList}>
+        {visitReasons.map((item) => {
+          const selected = reason === item;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              key={item}
+              onPress={() => setReason(item)}
+              style={[styles.reasonButton, selected && styles.reasonButtonActive]}>
+              <View style={[styles.reasonRadio, selected && styles.reasonRadioActive]}>
+                {selected && <View style={styles.reasonRadioDot} />}
+              </View>
+              <View style={styles.reasonCopy}>
+                <Text style={styles.reasonTitle}>{item}</Text>
+                <Text style={styles.reasonCaption}>{getReasonCaption(item)}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      <View style={styles.bookingSummaryStrip}>
+        <View style={styles.summaryStripIcon}>
+          <Icon name={{ ios: 'clock', android: 'schedule', web: 'schedule' }} color={colors.warm} size={18} />
+        </View>
+        <View>
+          <Text style={styles.summaryStripTitle}>{formatBookingDate(date)} · {time}</Text>
+          <Text style={styles.summaryStripCaption}>Estimated visit duration: 20 minutes</Text>
+        </View>
+      </View>
+    </BookingPage>
+  );
+}
+
+function BookingReview({
+  clinic,
+  draft,
+  onBack,
+  onConfirm,
+}: {
+  clinic: Clinic;
+  draft: BookingDraft;
+  onBack: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <BookingPage actionLabel="Confirm appointment" onAction={onConfirm} onBack={onBack} progress={2} title="Review booking">
+      <View style={styles.reviewHero}>
+        <View style={styles.reviewCalendarIcon}>
+          <Icon name={{ ios: 'calendar.badge.checkmark', android: 'event_available', web: 'event_available' }} color={colors.teal} size={30} />
+        </View>
+        <Text style={styles.reviewDate}>{draft.date}</Text>
+        <Text style={styles.reviewTime}>{draft.time}</Text>
+        <Text style={styles.reviewTimezone}>Singapore time · GMT+8</Text>
+      </View>
+
+      <View style={styles.reviewCard}>
+        <ReviewRow
+          icon={{ ios: 'cross.case.fill', android: 'medical_services', web: 'medical_services' }}
+          label="CLINIC"
+          value={clinic.name}
+          caption="10 Sinaran Drive, Singapore 307506"
+        />
+        <View style={styles.reviewDivider} />
+        <ReviewRow
+          icon={{ ios: 'person.fill', android: 'person', web: 'person' }}
+          label="DOCTOR"
+          value="Dr. Sarah Lim"
+          caption="Family Medicine"
+        />
+        <View style={styles.reviewDivider} />
+        <ReviewRow
+          icon={{ ios: 'text.bubble.fill', android: 'chat', web: 'chat' }}
+          label="VISIT REASON"
+          value={draft.reason}
+          caption="You can add more details at check-in"
+        />
+      </View>
+
+      <View style={styles.arrivalCard}>
+        <Icon name={{ ios: 'info.circle.fill', android: 'info', web: 'info' }} color={colors.blue} size={19} />
+        <View style={styles.arrivalContent}>
+          <Text style={styles.arrivalTitle}>Arrive 10 minutes early</Text>
+          <Text style={styles.arrivalCaption}>You’ll receive a check-in reminder before the appointment.</Text>
+        </View>
+      </View>
+
+      <View style={styles.policyCard}>
+        <View style={styles.policyRow}>
+          <Text style={styles.policyLabel}>Consultation estimate</Text>
+          <Text style={styles.policyValue}>S$35–55</Text>
+        </View>
+        <View style={styles.policyDivider} />
+        <View style={styles.policyRow}>
+          <Text style={styles.policyLabel}>Cancellation</Text>
+          <Text style={styles.policyValue}>Free up to 2 hours before</Text>
+        </View>
+      </View>
+
+      <Text style={styles.consentText}>
+        By confirming, you agree to share these appointment details with {clinic.name}.
+      </Text>
+    </BookingPage>
+  );
+}
+
+function BookingSuccess({ clinic, draft, onDone }: { clinic: Clinic; draft: BookingDraft; onDone: () => void }) {
+  return (
+    <View style={styles.successScreen}>
+      <SafeAreaView style={styles.successSafeArea}>
+        <View style={styles.successContent}>
+          <View style={styles.successMarkOuter}>
+            <View style={styles.successMark}>
+              <Icon name={{ ios: 'checkmark', android: 'check', web: 'check' }} color="#FFFFFF" size={34} />
+            </View>
+          </View>
+          <Text style={styles.successTitle}>Appointment confirmed</Text>
+          <Text style={styles.successCaption}>Your visit is booked. We’ll remind you when it’s time to check in.</Text>
+
+          <View style={styles.successTicket}>
+            <Text style={styles.ticketLabel}>APPOINTMENT</Text>
+            <Text style={styles.ticketClinic}>{clinic.name}</Text>
+            <View style={styles.ticketDivider} />
+            <View style={styles.ticketDetails}>
+              <View>
+                <Text style={styles.ticketDetailLabel}>DATE</Text>
+                <Text style={styles.ticketDetailValue}>{formatBookingDate(draft.date)}</Text>
+              </View>
+              <View>
+                <Text style={styles.ticketDetailLabel}>TIME</Text>
+                <Text style={styles.ticketDetailValue}>{draft.time}</Text>
+              </View>
+              <View>
+                <Text style={styles.ticketDetailLabel}>DOCTOR</Text>
+                <Text style={styles.ticketDetailValue}>Dr. Lim</Text>
+              </View>
+            </View>
+            <View style={styles.confirmationPill}>
+              <Icon name={{ ios: 'number', android: 'tag', web: 'tag' }} color={colors.teal} size={14} />
+              <Text style={styles.confirmationText}>Confirmation CQ-0813-1042</Text>
+            </View>
+          </View>
+
+          <View style={styles.queueReadyCard}>
+            <Icon name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }} color={colors.teal} size={22} />
+            <View style={styles.queueReadyContent}>
+              <Text style={styles.queueReadyTitle}>Mobile check-in ready</Text>
+              <Text style={styles.queueReadyCaption}>Your QR code will activate 30 minutes before the visit.</Text>
+            </View>
+          </View>
+
+          <Pressable accessibilityRole="button" onPress={onDone} style={styles.doneButton}>
+            <Text style={styles.doneButtonText}>Done</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+function BookingPage({
+  actionLabel,
+  children,
+  onAction,
+  onBack,
+  progress,
+  title,
+}: {
+  actionLabel: string;
+  children: ReactNode;
+  onAction: () => void;
+  onBack: () => void;
+  progress: 1 | 2;
+  title: string;
+}) {
+  return (
+    <View style={styles.screen}>
+      <SafeAreaView edges={['top']} style={styles.safeArea}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.bookingScrollContent}>
+          <View style={styles.detailNavigation}>
+            <Pressable accessibilityLabel="Go back" onPress={onBack} style={styles.backButton}>
+              <Icon name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} color={colors.ink} size={21} />
+            </Pressable>
+            <Text style={styles.detailNavigationTitle}>Book appointment</Text>
+            <View style={styles.navigationSpacer} />
+          </View>
+          <View style={styles.progressRow}>
+            {[1, 2, 3].map((step) => (
+              <View key={step} style={[styles.progressBar, step <= progress && styles.progressBarActive]} />
+            ))}
+          </View>
+          <Text style={styles.bookingKicker}>STEP {progress} OF 3</Text>
+          <Text style={styles.bookingTitle}>{title}</Text>
+          {children}
+          <Pressable accessibilityRole="button" onPress={onAction} style={styles.bookingActionButton}>
+            <Text style={styles.bookingActionText}>{actionLabel}</Text>
+            <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={18} />
+          </Pressable>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
+  );
+}
+
+function ReviewRow({
+  caption,
+  icon,
+  label,
+  value,
+}: {
+  caption: string;
+  icon: SymbolName;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.reviewRow}>
+      <View style={styles.reviewIcon}>
+        <Icon name={icon} color={colors.teal} size={19} />
+      </View>
+      <View style={styles.reviewRowContent}>
+        <Text style={styles.reviewRowLabel}>{label}</Text>
+        <Text style={styles.reviewRowValue}>{value}</Text>
+        <Text style={styles.reviewRowCaption}>{caption}</Text>
+      </View>
+    </View>
+  );
+}
+
+function getReasonCaption(reason: string) {
+  if (reason === 'Health screening') return 'Routine wellness tests and review';
+  if (reason === 'Vaccination') return 'Discuss or receive a vaccination';
+  return 'Discuss symptoms with your doctor';
+}
+
+function formatBookingDate(date: string) {
+  return date.replace(' 2026', '');
 }
 
 function InformationRow({ icon, title, caption }: { icon: SymbolName; title: string; caption: string }) {
@@ -971,6 +1393,555 @@ const styles = StyleSheet.create({
   chooseTimeText: {
     color: '#FFFFFF',
     fontSize: 10,
+    fontWeight: '800',
+  },
+  bookingScrollContent: {
+    width: '100%',
+    maxWidth: 680,
+    alignSelf: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 12,
+    paddingBottom: 120,
+  },
+  navigationSpacer: {
+    width: 44,
+    height: 44,
+  },
+  progressRow: {
+    flexDirection: 'row',
+    gap: 7,
+    marginTop: 22,
+  },
+  progressBar: {
+    flex: 1,
+    height: 4,
+    borderRadius: 3,
+    backgroundColor: colors.line,
+  },
+  progressBarActive: {
+    backgroundColor: colors.teal,
+  },
+  bookingKicker: {
+    marginTop: 23,
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  bookingTitle: {
+    marginTop: 5,
+    color: colors.ink,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.65,
+  },
+  bookingDoctorCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginTop: 18,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 20,
+    backgroundColor: colors.card,
+  },
+  bookingDoctorAvatar: {
+    width: 46,
+    height: 46,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 15,
+    backgroundColor: colors.blueSoft,
+  },
+  bookingDoctorContent: {
+    flex: 1,
+  },
+  bookingDoctorName: {
+    color: colors.ink,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  bookingDoctorClinic: {
+    marginTop: 4,
+    color: colors.muted,
+    fontSize: 9,
+  },
+  verifiedPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    borderRadius: 11,
+    backgroundColor: colors.tealSoft,
+  },
+  verifiedText: {
+    color: colors.teal,
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  bookingSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 25,
+    marginBottom: 12,
+  },
+  bookingSectionTitle: {
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  bookingSectionMeta: {
+    color: colors.teal,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  requiredText: {
+    color: colors.muted,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  dateRow: {
+    gap: 8,
+  },
+  dateButton: {
+    width: 63,
+    minHeight: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 18,
+    backgroundColor: colors.card,
+  },
+  dateButtonActive: {
+    borderColor: colors.teal,
+    backgroundColor: colors.teal,
+  },
+  dateDay: {
+    color: colors.muted,
+    fontSize: 8,
+    fontWeight: '800',
+  },
+  dateNumber: {
+    color: colors.ink,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  dateTextActive: {
+    color: '#FFFFFF',
+  },
+  timeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  timeButton: {
+    width: '31%',
+    minHeight: 42,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    backgroundColor: colors.card,
+  },
+  timeButtonActive: {
+    borderWidth: 2,
+    borderColor: colors.teal,
+    backgroundColor: colors.tealSoft,
+  },
+  timeButtonUnavailable: {
+    backgroundColor: '#EDF3F1',
+  },
+  timeText: {
+    color: '#496266',
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  timeTextActive: {
+    color: colors.teal,
+    fontWeight: '800',
+  },
+  timeTextUnavailable: {
+    color: '#B5C1C2',
+    textDecorationLine: 'line-through',
+  },
+  reasonList: {
+    gap: 8,
+  },
+  reasonButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 17,
+    backgroundColor: colors.card,
+  },
+  reasonButtonActive: {
+    borderColor: colors.teal,
+    backgroundColor: '#F7FCFA',
+  },
+  reasonRadio: {
+    width: 19,
+    height: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1.5,
+    borderColor: '#A7B8B8',
+    borderRadius: 10,
+  },
+  reasonRadioActive: {
+    borderColor: colors.teal,
+  },
+  reasonRadioDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: colors.teal,
+  },
+  reasonCopy: {
+    flex: 1,
+  },
+  reasonTitle: {
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  reasonCaption: {
+    marginTop: 3,
+    color: colors.muted,
+    fontSize: 9,
+  },
+  bookingSummaryStrip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginTop: 22,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: colors.warmSoft,
+  },
+  summaryStripIcon: {
+    width: 38,
+    height: 38,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    backgroundColor: colors.card,
+  },
+  summaryStripTitle: {
+    color: '#61430F',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  summaryStripCaption: {
+    marginTop: 4,
+    color: '#876727',
+    fontSize: 8,
+  },
+  bookingActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 9,
+    minHeight: 54,
+    marginTop: 24,
+    borderRadius: 18,
+    backgroundColor: colors.teal,
+    shadowColor: colors.teal,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.22,
+    shadowRadius: 22,
+    elevation: 6,
+  },
+  bookingActionText: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  reviewHero: {
+    alignItems: 'center',
+    marginTop: 20,
+    paddingVertical: 22,
+  },
+  reviewCalendarIcon: {
+    width: 68,
+    height: 68,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 23,
+    backgroundColor: colors.tealSoft,
+  },
+  reviewDate: {
+    marginTop: 14,
+    color: colors.ink,
+    fontSize: 17,
+    fontWeight: '800',
+  },
+  reviewTime: {
+    marginTop: 4,
+    color: colors.teal,
+    fontSize: 25,
+    fontWeight: '800',
+  },
+  reviewTimezone: {
+    marginTop: 5,
+    color: colors.muted,
+    fontSize: 9,
+  },
+  reviewCard: {
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 22,
+    backgroundColor: colors.card,
+  },
+  reviewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  reviewIcon: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: colors.tealSoft,
+  },
+  reviewRowContent: {
+    flex: 1,
+  },
+  reviewRowLabel: {
+    color: colors.muted,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.7,
+  },
+  reviewRowValue: {
+    marginTop: 4,
+    color: colors.ink,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  reviewRowCaption: {
+    marginTop: 3,
+    color: colors.muted,
+    fontSize: 9,
+  },
+  reviewDivider: {
+    height: 1,
+    marginVertical: 14,
+    backgroundColor: '#E7F0EE',
+  },
+  arrivalCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: colors.blueSoft,
+  },
+  arrivalContent: {
+    flex: 1,
+  },
+  arrivalTitle: {
+    color: colors.blue,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  arrivalCaption: {
+    marginTop: 3,
+    color: '#647492',
+    fontSize: 9,
+    lineHeight: 13,
+  },
+  policyCard: {
+    marginTop: 14,
+    padding: 15,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 18,
+    backgroundColor: colors.card,
+  },
+  policyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  policyLabel: {
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  policyValue: {
+    color: colors.ink,
+    fontSize: 9,
+    fontWeight: '800',
+    textAlign: 'right',
+  },
+  policyDivider: {
+    height: 1,
+    marginVertical: 12,
+    backgroundColor: '#E7F0EE',
+  },
+  consentText: {
+    marginTop: 16,
+    paddingHorizontal: 12,
+    color: colors.muted,
+    fontSize: 8,
+    lineHeight: 13,
+    textAlign: 'center',
+  },
+  successScreen: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  successSafeArea: {
+    flex: 1,
+  },
+  successContent: {
+    width: '100%',
+    maxWidth: 540,
+    flex: 1,
+    alignSelf: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 22,
+    paddingVertical: 28,
+  },
+  successMarkOuter: {
+    width: 88,
+    height: 88,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 44,
+    backgroundColor: colors.tealSoft,
+  },
+  successMark: {
+    width: 58,
+    height: 58,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 29,
+    backgroundColor: colors.teal,
+  },
+  successTitle: {
+    marginTop: 20,
+    color: colors.ink,
+    fontSize: 25,
+    fontWeight: '800',
+    letterSpacing: -0.6,
+    textAlign: 'center',
+  },
+  successCaption: {
+    alignSelf: 'center',
+    maxWidth: 360,
+    marginTop: 8,
+    color: colors.muted,
+    fontSize: 11,
+    lineHeight: 17,
+    textAlign: 'center',
+  },
+  successTicket: {
+    marginTop: 24,
+    padding: 19,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 24,
+    backgroundColor: colors.card,
+  },
+  ticketLabel: {
+    color: colors.muted,
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+  },
+  ticketClinic: {
+    marginTop: 5,
+    color: colors.ink,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  ticketDivider: {
+    height: 1,
+    marginVertical: 15,
+    backgroundColor: '#E7F0EE',
+  },
+  ticketDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  ticketDetailLabel: {
+    color: colors.muted,
+    fontSize: 7,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+  },
+  ticketDetailValue: {
+    marginTop: 5,
+    color: colors.ink,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  confirmationPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginTop: 17,
+    paddingVertical: 9,
+    borderRadius: 14,
+    backgroundColor: colors.tealSoft,
+  },
+  confirmationText: {
+    color: colors.teal,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  queueReadyCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    marginTop: 13,
+    padding: 14,
+    borderRadius: 18,
+    backgroundColor: colors.warmSoft,
+  },
+  queueReadyContent: {
+    flex: 1,
+  },
+  queueReadyTitle: {
+    color: '#61430F',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  queueReadyCaption: {
+    marginTop: 3,
+    color: '#876727',
+    fontSize: 8,
+  },
+  doneButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+    marginTop: 17,
+    borderRadius: 17,
+    backgroundColor: colors.teal,
+  },
+  doneButtonText: {
+    color: '#FFFFFF',
+    fontSize: 12,
     fontWeight: '800',
   },
   emptyState: {
