@@ -1,9 +1,11 @@
 import { SymbolView } from 'expo-symbols';
+import { useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -45,6 +47,8 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 }
 
 export function JourneyScreen() {
+  const router = useRouter();
+  const { appointment, loading } = useAppointment();
   const [activeTab, setActiveTab] = useState<JourneyTab>('current');
   const [qrVisible, setQrVisible] = useState(false);
 
@@ -81,20 +85,25 @@ export function JourneyScreen() {
             </Pressable>
           </View>
 
-          {activeTab === 'current' ? (
-            <CurrentJourney onCheckIn={() => setQrVisible(true)} />
-          ) : (
-            <PastJourney />
+          {activeTab === 'current' && loading && <JourneyLoading />}
+          {activeTab === 'current' && !loading && appointment && (
+            <CurrentJourney appointment={appointment} onCheckIn={() => setQrVisible(true)} />
           )}
+          {activeTab === 'current' && !loading && !appointment && (
+            <EmptyJourney onBook={() => router.push('/explore')} />
+          )}
+          {activeTab === 'past' && <PastJourney />}
         </ScrollView>
       </SafeAreaView>
 
-      <CheckInModal onClose={() => setQrVisible(false)} visible={qrVisible} />
+      <CheckInModal appointment={appointment} onClose={() => setQrVisible(false)} visible={qrVisible} />
     </View>
   );
 }
 
-function CurrentJourney({ onCheckIn }: { onCheckIn: () => void }) {
+function CurrentJourney({ appointment, onCheckIn }: { appointment: Appointment; onCheckIn: () => void }) {
+  const checkInTime = getCheckInTime(appointment.time);
+
   return (
     <>
       <View style={styles.visitCard}>
@@ -103,22 +112,22 @@ function CurrentJourney({ onCheckIn }: { onCheckIn: () => void }) {
           <View style={styles.upcomingDot} />
           <Text style={styles.upcomingText}>UPCOMING</Text>
         </View>
-        <Text style={styles.visitTitle}>Family medicine visit</Text>
-        <Text style={styles.visitClinic}>Dr. Sarah Lim · Novena Medical Clinic</Text>
+        <Text style={styles.visitTitle}>{getVisitTitle(appointment.reason)}</Text>
+        <Text style={styles.visitClinic}>{appointment.doctorName} · {appointment.clinicName}</Text>
         <View style={styles.visitDateRow}>
           <View style={styles.visitDateItem}>
             <Icon name={{ ios: 'calendar', android: 'calendar_month', web: 'calendar_month' }} color="#E9FFF9" size={17} />
-            <Text style={styles.visitDateText}>Thu, 13 Aug</Text>
+            <Text style={styles.visitDateText}>{formatJourneyDate(appointment.date)}</Text>
           </View>
           <View style={styles.visitDateItem}>
             <Icon name={{ ios: 'clock', android: 'schedule', web: 'schedule' }} color="#E9FFF9" size={17} />
-            <Text style={styles.visitDateText}>11:10 AM</Text>
+            <Text style={styles.visitDateText}>{appointment.time}</Text>
           </View>
         </View>
         <View style={styles.queuePanel}>
           <View>
             <Text style={styles.queueLabel}>LIVE QUEUE FORECAST</Text>
-            <Text style={styles.queueValue}>8–14 min wait</Text>
+            <Text style={styles.queueValue}>{appointment.waitMinutes}–{appointment.waitMinutes + 6} min wait</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.checkInButton}>
             <Icon name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }} color={colors.tealDark} size={16} />
@@ -138,7 +147,7 @@ function CurrentJourney({ onCheckIn }: { onCheckIn: () => void }) {
         <TimelineItem
           action="Preview QR →"
           caption="Scan your Clinque QR code when you arrive. Available 30 minutes before the visit."
-          footer="Opens at 10:40 AM"
+          footer={`Opens at ${checkInTime}`}
           icon={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }}
           onPress={onCheckIn}
           title="Mobile check-in"
@@ -159,11 +168,39 @@ function CurrentJourney({ onCheckIn }: { onCheckIn: () => void }) {
         </View>
         <View style={styles.documentContent}>
           <Text style={styles.documentTitle}>Appointment confirmation</Text>
-          <Text style={styles.documentCaption}>PDF · Added today</Text>
+          <Text style={styles.documentCaption}>{appointment.confirmationCode} · Added today</Text>
         </View>
         <Icon name={{ ios: 'arrow.down.to.line', android: 'download', web: 'download' }} color={colors.teal} size={19} />
       </Pressable>
     </>
+  );
+}
+
+function JourneyLoading() {
+  return (
+    <View style={styles.journeyLoading}>
+      <View style={styles.loadingPill} />
+      <View style={styles.loadingLine} />
+      <View style={[styles.loadingLine, styles.loadingLineShort]} />
+    </View>
+  );
+}
+
+function EmptyJourney({ onBook }: { onBook: () => void }) {
+  return (
+    <View style={styles.emptyJourney}>
+      <View style={styles.emptyJourneyIcon}>
+        <Icon name={{ ios: 'calendar.badge.plus', android: 'calendar_add_on', web: 'calendar_add_on' }} size={28} />
+      </View>
+      <Text style={styles.emptyJourneyTitle}>Your next visit starts here</Text>
+      <Text style={styles.emptyJourneyCaption}>
+        Book a clinic appointment and Clinque will organize your check-in, timeline, and documents here.
+      </Text>
+      <Pressable accessibilityRole="button" onPress={onBook} style={styles.emptyJourneyButton}>
+        <Text style={styles.emptyJourneyButtonText}>Find a clinic</Text>
+        <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={17} />
+      </Pressable>
+    </View>
   );
 }
 
@@ -252,7 +289,17 @@ function SectionHeader({ count, title }: { count: string; title: string }) {
   );
 }
 
-function CheckInModal({ onClose, visible }: { onClose: () => void; visible: boolean }) {
+function CheckInModal({
+  appointment,
+  onClose,
+  visible,
+}: {
+  appointment: Appointment | null;
+  onClose: () => void;
+  visible: boolean;
+}) {
+  if (!appointment) return null;
+
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
       <View style={styles.modalBackdrop}>
@@ -264,7 +311,7 @@ function CheckInModal({ onClose, visible }: { onClose: () => void; visible: bool
             <Icon name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }} color={colors.teal} size={27} />
           </View>
           <Text style={styles.modalTitle}>Mobile check-in</Text>
-          <Text style={styles.modalCaption}>Show this QR code at Novena Medical Clinic when you arrive.</Text>
+          <Text style={styles.modalCaption}>Show this QR code at {appointment.clinicName} when you arrive.</Text>
           <View style={styles.qrCode}>
             {qrPattern.map((row, rowIndex) =>
               row.split('').map((cell, columnIndex) => (
@@ -275,10 +322,10 @@ function CheckInModal({ onClose, visible }: { onClose: () => void; visible: bool
               )),
             )}
           </View>
-          <Text style={styles.qrConfirmation}>CQ-0813-1042</Text>
+          <Text style={styles.qrConfirmation}>{appointment.confirmationCode}</Text>
           <View style={styles.modalStatus}>
             <View style={styles.modalStatusDot} />
-            <Text style={styles.modalStatusText}>Activates at 10:40 AM</Text>
+            <Text style={styles.modalStatusText}>Activates at {getCheckInTime(appointment.time)}</Text>
           </View>
           <Pressable accessibilityRole="button" onPress={onClose} style={styles.modalDone}>
             <Text style={styles.modalDoneText}>Done</Text>
@@ -287,6 +334,32 @@ function CheckInModal({ onClose, visible }: { onClose: () => void; visible: bool
       </View>
     </Modal>
   );
+}
+
+function formatJourneyDate(date: string) {
+  return date.replace(/,? 2026$/, '');
+}
+
+function getVisitTitle(reason: string) {
+  if (reason === 'Health screening') return 'Health screening';
+  if (reason === 'Vaccination') return 'Vaccination appointment';
+  return 'Family medicine visit';
+}
+
+function getCheckInTime(time: string) {
+  const [clock, period] = time.split(' ');
+  const [hourValue, minuteValue] = clock.split(':').map(Number);
+  let minutesSinceMidnight = (hourValue % 12) * 60 + minuteValue;
+
+  if (period === 'PM') minutesSinceMidnight += 12 * 60;
+  minutesSinceMidnight = (minutesSinceMidnight - 30 + 24 * 60) % (24 * 60);
+
+  const hour = Math.floor(minutesSinceMidnight / 60);
+  const minute = minutesSinceMidnight % 60;
+  const formattedHour = hour % 12 || 12;
+  const formattedPeriod = hour >= 12 ? 'PM' : 'AM';
+
+  return `${formattedHour}:${minute.toString().padStart(2, '0')} ${formattedPeriod}`;
 }
 
 const styles = StyleSheet.create({
@@ -316,6 +389,16 @@ const styles = StyleSheet.create({
   segmentActive: { backgroundColor: colors.card },
   segmentText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
   segmentTextActive: { color: colors.teal },
+  journeyLoading: { marginTop: 18, padding: 22, borderRadius: 26, backgroundColor: '#E6EFED' },
+  loadingPill: { width: 82, height: 22, borderRadius: 11, backgroundColor: '#D2E1DE' },
+  loadingLine: { width: '72%', height: 18, marginTop: 20, borderRadius: 9, backgroundColor: '#D2E1DE' },
+  loadingLineShort: { width: '48%', height: 11, marginTop: 10 },
+  emptyJourney: { alignItems: 'center', marginTop: 18, paddingHorizontal: 24, paddingVertical: 38, borderWidth: 1, borderColor: colors.line, borderRadius: 26, backgroundColor: colors.card },
+  emptyJourneyIcon: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: colors.tealSoft },
+  emptyJourneyTitle: { marginTop: 18, color: colors.ink, fontSize: 17, fontWeight: '800', textAlign: 'center' },
+  emptyJourneyCaption: { maxWidth: 360, marginTop: 8, color: colors.muted, fontSize: 10, lineHeight: 16, textAlign: 'center' },
+  emptyJourneyButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, minWidth: 150, minHeight: 46, marginTop: 20, paddingHorizontal: 18, borderRadius: 15, backgroundColor: colors.teal },
+  emptyJourneyButtonText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   visitCard: {
     position: 'relative', overflow: 'hidden', marginTop: 18, padding: 20, borderRadius: 26,
     backgroundColor: colors.tealDark, shadowColor: colors.tealDark, shadowOffset: { width: 0, height: 14 },

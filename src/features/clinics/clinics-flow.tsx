@@ -1,8 +1,11 @@
 import { SymbolView } from 'expo-symbols';
+import { useRouter } from 'expo-router';
 import type { ComponentProps, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+
+import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
 
 import {
   appointmentDates,
@@ -24,11 +27,14 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 }
 
 export function ClinicsFlow() {
+  const router = useRouter();
+  const { saveAppointment } = useAppointment();
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<ClinicFilter>('Nearby');
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null);
   const [bookingStage, setBookingStage] = useState<BookingStage>('details');
   const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
+  const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
 
   const visibleClinics = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -64,20 +70,27 @@ export function ClinicsFlow() {
         clinic={selectedClinic}
         draft={bookingDraft}
         onBack={() => setBookingStage('schedule')}
-        onConfirm={() => setBookingStage('success')}
+        onConfirm={async () => {
+          const appointment = await saveAppointment(selectedClinic, bookingDraft);
+          setConfirmedAppointment(appointment);
+          setBookingStage('success');
+        }}
       />
     );
   }
 
-  if (selectedClinic && bookingStage === 'success' && bookingDraft) {
+  if (selectedClinic && bookingStage === 'success' && bookingDraft && confirmedAppointment) {
     return (
       <BookingSuccess
+        appointment={confirmedAppointment}
         clinic={selectedClinic}
         draft={bookingDraft}
         onDone={() => {
           setSelectedClinic(null);
           setBookingDraft(null);
+          setConfirmedAppointment(null);
           setBookingStage('details');
+          router.push('/journey');
         }}
       />
     );
@@ -595,7 +608,17 @@ function BookingReview({
   );
 }
 
-function BookingSuccess({ clinic, draft, onDone }: { clinic: Clinic; draft: BookingDraft; onDone: () => void }) {
+function BookingSuccess({
+  appointment,
+  clinic,
+  draft,
+  onDone,
+}: {
+  appointment: Appointment;
+  clinic: Clinic;
+  draft: BookingDraft;
+  onDone: () => void;
+}) {
   return (
     <View style={styles.successScreen}>
       <SafeAreaView style={styles.successSafeArea}>
@@ -628,7 +651,7 @@ function BookingSuccess({ clinic, draft, onDone }: { clinic: Clinic; draft: Book
             </View>
             <View style={styles.confirmationPill}>
               <Icon name={{ ios: 'number', android: 'tag', web: 'tag' }} color={colors.teal} size={14} />
-              <Text style={styles.confirmationText}>Confirmation CQ-0813-1042</Text>
+              <Text style={styles.confirmationText}>Confirmation {appointment.confirmationCode}</Text>
             </View>
           </View>
 
@@ -641,7 +664,7 @@ function BookingSuccess({ clinic, draft, onDone }: { clinic: Clinic; draft: Book
           </View>
 
           <Pressable accessibilityRole="button" onPress={onDone} style={styles.doneButton}>
-            <Text style={styles.doneButtonText}>Done</Text>
+            <Text style={styles.doneButtonText}>View journey</Text>
           </Pressable>
         </View>
       </SafeAreaView>
