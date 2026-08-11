@@ -35,6 +35,12 @@ export default function AppTabs() {
               }}
             />
           </TabTrigger>
+          <TabTrigger name="profile" href="/profile" asChild>
+            <TabButton
+              label="Profile"
+              icon={{ ios: 'person.crop.circle', android: 'account_circle', web: 'account_circle' }}
+            />
+          </TabTrigger>
         </ClinqueTabBar>
       </TabList>
     </Tabs>
@@ -50,15 +56,6 @@ function ClinqueTabBar(props: TabListProps) {
         </View>
 
         {props.children}
-
-        <View style={styles.futureTab}>
-          <SymbolView
-            name={{ ios: 'person', android: 'person', web: 'person' }}
-            tintColor="#8BA09F"
-            size={20}
-          />
-          <Text style={styles.futureLabel}>Profile</Text>
-        </View>
       </View>
     </View>
   );
@@ -142,17 +139,5 @@ const styles = StyleSheet.create({
   },
   tabLabelFocused: {
     color: '#0E746A',
-  },
-  futureTab: {
-    minWidth: 62,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingVertical: 6,
-  },
-  futureLabel: {
-    color: '#8BA09F',
-    fontSize: 10,
-    fontWeight: '700',
   },
 });

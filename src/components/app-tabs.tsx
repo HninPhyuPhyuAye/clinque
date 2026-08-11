@@ -35,6 +35,14 @@ export default function AppTabs() {
           md={{ default: 'route', selected: 'route' }}
         />
       </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="profile">
+        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'person.crop.circle', selected: 'person.crop.circle.fill' }}
+          md={{ default: 'account_circle', selected: 'account_circle' }}
+        />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
