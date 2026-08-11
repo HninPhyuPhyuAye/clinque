@@ -27,6 +27,14 @@ export default function AppTabs() {
           renderingMode="template"
         />
       </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="journey">
+        <NativeTabs.Trigger.Label>Journey</NativeTabs.Trigger.Label>
+        <NativeTabs.Trigger.Icon
+          sf={{ default: 'point.bottomleft.forward.to.point.topright.scurvepath', selected: 'point.bottomleft.forward.to.point.topright.scurvepath.fill' }}
+          md={{ default: 'route', selected: 'route' }}
+        />
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }

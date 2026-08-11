@@ -25,6 +25,16 @@ export default function AppTabs() {
               icon={{ ios: 'cross.case', android: 'local_hospital', web: 'local_hospital' }}
             />
           </TabTrigger>
+          <TabTrigger name="journey" href="/journey" asChild>
+            <TabButton
+              label="Journey"
+              icon={{
+                ios: 'point.bottomleft.forward.to.point.topright.scurvepath',
+                android: 'route',
+                web: 'route',
+              }}
+            />
+          </TabTrigger>
         </ClinqueTabBar>
       </TabList>
     </Tabs>
@@ -41,18 +51,6 @@ function ClinqueTabBar(props: TabListProps) {
 
         {props.children}
 
-        <View style={styles.futureTab}>
-          <SymbolView
-            name={{
-              ios: 'point.bottomleft.forward.to.point.topright.scurvepath',
-              android: 'route',
-              web: 'route',
-            }}
-            tintColor="#8BA09F"
-            size={20}
-          />
-          <Text style={styles.futureLabel}>Journey</Text>
-        </View>
         <View style={styles.futureTab}>
           <SymbolView
             name={{ ios: 'person', android: 'person', web: 'person' }}
