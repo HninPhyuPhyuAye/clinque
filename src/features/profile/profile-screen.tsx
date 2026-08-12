@@ -3,12 +3,13 @@ import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import type { ComponentProps, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/features/auth/auth-context';
 import { clinics } from '@/features/clinics/clinic-data';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
+import { supabase } from '@/lib/supabase';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -17,6 +18,11 @@ type ProfilePreferences = {
   appointmentReminders: boolean;
   queueAlerts: boolean;
   biometricUnlock: boolean;
+};
+
+type PatientIdentity = {
+  fullName: string;
+  phone: string;
 };
 
 const profileStorageKey = '@clinque/profile-preferences';
@@ -38,11 +44,14 @@ export function ProfileScreen() {
   const [clinicPickerVisible, setClinicPickerVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
   const [detailsVisible, setDetailsVisible] = useState(false);
+  const [identity, setIdentity] = useState<PatientIdentity>({ fullName: '', phone: '' });
+  const [identityLoading, setIdentityLoading] = useState(Boolean(user && !isDemo));
+  const [identityError, setIdentityError] = useState<string | null>(null);
 
   const preferredClinic = clinics.find((clinic) => clinic.id === preferences.preferredClinicId) ?? clinics[0];
-  const authenticatedName = typeof user?.user_metadata.full_name === 'string'
+  const authenticatedName = identity.fullName || (typeof user?.user_metadata.full_name === 'string'
     ? user.user_metadata.full_name
-    : user?.email?.split('@')[0];
+    : user?.email?.split('@')[0]);
   const displayName = isDemo ? 'Maya Tan' : authenticatedName || 'Clinque patient';
   const initials = displayName
     .split(/\s+/)
@@ -70,6 +79,58 @@ export function ProfileScreen() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadIdentity() {
+      if (!user || isDemo) {
+        setIdentity({ fullName: 'Maya Tan', phone: '+65 8123 4567' });
+        setIdentityLoading(false);
+        return;
+      }
+
+      setIdentityLoading(true);
+      setIdentityError(null);
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('full_name, phone')
+        .eq('id', user.id)
+        .single();
+
+      if (!active) return;
+
+      if (error) {
+        setIdentityError(`Clinque could not load your secure profile: ${error.message}`);
+      } else {
+        setIdentity({ fullName: data.full_name, phone: data.phone ?? '' });
+      }
+      setIdentityLoading(false);
+    }
+
+    void loadIdentity();
+    return () => {
+      active = false;
+    };
+  }, [isDemo, user]);
+
+  async function saveIdentity(nextIdentity: PatientIdentity) {
+    if (!user || isDemo) return 'Demo identity is read-only.';
+
+    const fullName = nextIdentity.fullName.trim();
+    const phone = nextIdentity.phone.trim();
+    if (fullName.length < 2) return 'Enter a full name with at least 2 characters.';
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({ full_name: fullName, phone: phone || null })
+      .eq('id', user.id);
+
+    if (error) return error.message;
+    setIdentity({ fullName, phone });
+    setIdentityError(null);
+    return null;
+  }
 
   function updatePreferences(update: Partial<ProfilePreferences>) {
     setPreferences((current) => {
@@ -111,7 +172,9 @@ export function ProfileScreen() {
                 <Icon name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} color="#9DE1D1" size={18} />
               </View>
               <Text style={styles.profileMeta}>{isDemo ? 'Patient ID · CQ-20418' : user?.email}</Text>
-              <Text style={styles.profileMeta}>{isDemo ? 'Singapore · English' : 'Supabase authenticated patient'}</Text>
+              <Text style={styles.profileMeta}>
+                {isDemo ? 'Singapore · English' : identityLoading ? 'Synchronizing secure profile…' : identity.phone || 'Add a contact number'}
+              </Text>
             </View>
             <Pressable
               accessibilityLabel="View patient details"
@@ -242,27 +305,26 @@ export function ProfileScreen() {
         selectedClinicId={preferences.preferredClinicId}
         visible={clinicPickerVisible}
       />
-      <InformationModal
-        icon={{ ios: 'person.crop.circle.fill', android: 'account_circle', web: 'account_circle' }}
+      <PatientDetailsModal
+        email={isDemo ? 'maya.tan@example.com' : user?.email ?? 'Not available'}
+        error={identityError}
+        identity={identity}
+        isDemo={isDemo}
         onClose={() => setDetailsVisible(false)}
-        title="Patient details"
-        visible={detailsVisible}>
-        <InfoLine label="Full name" value={displayName} />
-        <InfoLine label="Account" value={isDemo ? 'Portfolio demonstration' : 'Supabase authenticated'} />
-        <InfoLine label="Email" value={isDemo ? 'maya.tan@example.com' : user?.email ?? 'Not available'} />
-        <Text style={styles.modalFootnote}>Editing will be enabled after secure authentication is connected.</Text>
-      </InformationModal>
+        onSave={saveIdentity}
+        visible={detailsVisible}
+      />
       <InformationModal
         icon={{ ios: 'lock.shield.fill', android: 'shield_lock', web: 'shield_lock' }}
         onClose={() => setPrivacyVisible(false)}
         title="Privacy & data"
         visible={privacyVisible}>
         <Text style={styles.privacyModalText}>
-          This portfolio prototype keeps appointment and preference data only in this browser or device. It does not send medical information to a clinic or cloud service.
+          Signed-in identity, appointment, and queue records are protected in Supabase with row-level security. Display and notification preferences remain only on this device.
         </Text>
         <View style={styles.privacyBadge}>
-          <Icon name={{ ios: 'iphone', android: 'smartphone', web: 'smartphone' }} size={17} />
-          <Text style={styles.privacyBadgeText}>Stored locally for demonstration</Text>
+          <Icon name={{ ios: 'lock.shield.fill', android: 'shield_lock', web: 'shield_lock' }} size={17} />
+          <Text style={styles.privacyBadgeText}>Patient-owned cloud records</Text>
         </View>
       </InformationModal>
     </View>
@@ -379,6 +441,103 @@ function ClinicPickerModal({
               );
             })}
           </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function PatientDetailsModal({
+  email,
+  error,
+  identity,
+  isDemo,
+  onClose,
+  onSave,
+  visible,
+}: {
+  email: string;
+  error: string | null;
+  identity: PatientIdentity;
+  isDemo: boolean;
+  onClose: () => void;
+  onSave: (identity: PatientIdentity) => Promise<string | null>;
+  visible: boolean;
+}) {
+  const [fullName, setFullName] = useState(identity.fullName);
+  const [phone, setPhone] = useState(identity.phone);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!visible) return;
+    setFullName(identity.fullName);
+    setPhone(identity.phone);
+    setMessage(error);
+    setSaved(false);
+  }, [error, identity, visible]);
+
+  async function submit() {
+    setSaving(true);
+    setMessage(null);
+    const saveError = await onSave({ fullName, phone });
+    setSaving(false);
+    setSaved(!saveError);
+    setMessage(saveError ?? 'Your patient identity was securely updated.');
+  }
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalBackdrop}>
+        <View style={styles.modalCard}>
+          <ModalHeader onClose={onClose} title="Patient details" />
+          <View style={styles.informationIcon}>
+            <Icon name={{ ios: 'person.crop.circle.fill', android: 'account_circle', web: 'account_circle' }} size={27} />
+          </View>
+          <View style={styles.informationContent}>
+            <Text style={styles.identityLabel}>Full name</Text>
+            <TextInput
+              accessibilityLabel="Full name"
+              editable={!isDemo && !saving}
+              onChangeText={setFullName}
+              placeholder="Your full name"
+              placeholderTextColor="#8A9E9D"
+              style={[styles.identityInput, isDemo && styles.identityInputDisabled]}
+              value={fullName}
+            />
+            <Text style={styles.identityLabel}>Phone number</Text>
+            <TextInput
+              accessibilityLabel="Phone number"
+              editable={!isDemo && !saving}
+              keyboardType="phone-pad"
+              onChangeText={setPhone}
+              placeholder="+65 8123 4567"
+              placeholderTextColor="#8A9E9D"
+              style={[styles.identityInput, isDemo && styles.identityInputDisabled]}
+              value={phone}
+            />
+            <InfoLine label="Email" value={email} />
+            <Text style={styles.identityEmailNote}>Email is controlled by your authenticated account and cannot be edited here.</Text>
+            {message && (
+              <View style={[styles.identityMessage, saved && styles.identitySuccessMessage]}>
+                <Text style={[styles.identityMessageText, saved && styles.identitySuccessText]}>{message}</Text>
+              </View>
+            )}
+          </View>
+          {isDemo ? (
+            <Pressable accessibilityRole="button" onPress={onClose} style={styles.modalDone}>
+              <Text style={styles.modalDoneText}>Done</Text>
+            </Pressable>
+          ) : (
+            <Pressable
+              accessibilityRole="button"
+              disabled={saving}
+              onPress={() => void submit()}
+              style={[styles.modalDone, saving && styles.modalButtonDisabled]}>
+              {saving ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.modalDoneText}>Save secure profile</Text>}
+            </Pressable>
+          )}
         </View>
       </View>
     </Modal>
@@ -503,10 +662,18 @@ const styles = StyleSheet.create({
   infoLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#EAF1EF' },
   infoLabel: { color: colors.muted, fontSize: 9 },
   infoValue: { color: colors.ink, fontSize: 9, fontWeight: '800', textAlign: 'right' },
-  modalFootnote: { marginTop: 14, color: colors.muted, fontSize: 8, lineHeight: 13, textAlign: 'center' },
+  identityLabel: { marginTop: 12, marginBottom: 6, color: colors.ink, fontSize: 8, fontWeight: '800' },
+  identityInput: { minHeight: 47, paddingHorizontal: 13, borderWidth: 1, borderColor: colors.line, borderRadius: 14, backgroundColor: '#FAFCFB', color: colors.ink, fontSize: 10, outlineStyle: 'none' } as never,
+  identityInputDisabled: { backgroundColor: '#EFF4F3', color: colors.muted },
+  identityEmailNote: { marginTop: 9, color: colors.muted, fontSize: 7, lineHeight: 11 },
+  identityMessage: { marginTop: 13, padding: 10, borderRadius: 12, backgroundColor: '#FCEAE8' },
+  identitySuccessMessage: { backgroundColor: colors.tealSoft },
+  identityMessageText: { color: '#8A342E', fontSize: 8, lineHeight: 12 },
+  identitySuccessText: { color: '#25665F' },
   privacyModalText: { color: colors.muted, fontSize: 10, lineHeight: 16, textAlign: 'center' },
   privacyBadge: { alignSelf: 'center', flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 16, paddingHorizontal: 11, paddingVertical: 8, borderRadius: 13, backgroundColor: colors.tealSoft },
   privacyBadgeText: { color: colors.teal, fontSize: 8, fontWeight: '800' },
   modalDone: { alignItems: 'center', justifyContent: 'center', minHeight: 47, marginTop: 18, borderRadius: 15, backgroundColor: colors.teal },
+  modalButtonDisabled: { opacity: 0.65 },
   modalDoneText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
 });
