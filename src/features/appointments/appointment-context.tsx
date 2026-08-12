@@ -21,8 +21,10 @@ export type Appointment = {
 
 type AppointmentContextValue = {
   appointment: Appointment | null;
+  cancelAppointment: () => Promise<void>;
   loading: boolean;
   saveAppointment: (clinic: Clinic, draft: BookingDraft) => Promise<Appointment>;
+  updateAppointment: (draft: Pick<BookingDraft, 'date' | 'time'>) => Promise<Appointment | null>;
 };
 
 const AppointmentContext = createContext<AppointmentContextValue | null>(null);
@@ -58,6 +60,14 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppointmentContextValue>(
     () => ({
       appointment,
+      cancelAppointment: async () => {
+        setAppointment(null);
+        try {
+          await AsyncStorage.removeItem(appointmentStorageKey);
+        } catch {
+          // Keep the appointment cancelled for the current session if device storage is unavailable.
+        }
+      },
       loading,
       saveAppointment: async (clinic, draft) => {
         const nextAppointment = createAppointment(clinic, draft);
@@ -70,6 +80,20 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         }
 
         return nextAppointment;
+      },
+      updateAppointment: async (draft) => {
+        if (!appointment) return null;
+
+        const updatedAppointment = { ...appointment, ...draft };
+        setAppointment(updatedAppointment);
+
+        try {
+          await AsyncStorage.setItem(appointmentStorageKey, JSON.stringify(updatedAppointment));
+        } catch {
+          // Keep the updated booking available for the current session if device storage is unavailable.
+        }
+
+        return updatedAppointment;
       },
     }),
     [appointment, loading],

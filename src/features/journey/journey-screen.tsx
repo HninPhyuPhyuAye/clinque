@@ -6,6 +6,7 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
+import { appointmentDates, appointmentTimes } from '@/features/clinics/clinic-data';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -49,9 +50,11 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 export function JourneyScreen() {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
-  const { appointment, loading } = useAppointment();
+  const { appointment, cancelAppointment, loading, updateAppointment } = useAppointment();
   const [activeTab, setActiveTab] = useState<JourneyTab>(tab === 'past' ? 'past' : 'current');
   const [qrVisible, setQrVisible] = useState(false);
+  const [rescheduleVisible, setRescheduleVisible] = useState(false);
+  const [cancelVisible, setCancelVisible] = useState(false);
 
   useEffect(() => {
     setActiveTab(tab === 'past' ? 'past' : 'current');
@@ -92,7 +95,12 @@ export function JourneyScreen() {
 
           {activeTab === 'current' && loading && <JourneyLoading />}
           {activeTab === 'current' && !loading && appointment && (
-            <CurrentJourney appointment={appointment} onCheckIn={() => setQrVisible(true)} />
+            <CurrentJourney
+              appointment={appointment}
+              onCancel={() => setCancelVisible(true)}
+              onCheckIn={() => setQrVisible(true)}
+              onReschedule={() => setRescheduleVisible(true)}
+            />
           )}
           {activeTab === 'current' && !loading && !appointment && (
             <EmptyJourney onBook={() => router.push('/explore')} />
@@ -102,11 +110,39 @@ export function JourneyScreen() {
       </SafeAreaView>
 
       <CheckInModal appointment={appointment} onClose={() => setQrVisible(false)} visible={qrVisible} />
+      <RescheduleModal
+        appointment={appointment}
+        onClose={() => setRescheduleVisible(false)}
+        onSave={async (date, time) => {
+          await updateAppointment({ date, time });
+          setRescheduleVisible(false);
+        }}
+        visible={rescheduleVisible}
+      />
+      <CancelAppointmentModal
+        appointment={appointment}
+        onClose={() => setCancelVisible(false)}
+        onConfirm={async () => {
+          await cancelAppointment();
+          setCancelVisible(false);
+        }}
+        visible={cancelVisible}
+      />
     </View>
   );
 }
 
-function CurrentJourney({ appointment, onCheckIn }: { appointment: Appointment; onCheckIn: () => void }) {
+function CurrentJourney({
+  appointment,
+  onCancel,
+  onCheckIn,
+  onReschedule,
+}: {
+  appointment: Appointment;
+  onCancel: () => void;
+  onCheckIn: () => void;
+  onReschedule: () => void;
+}) {
   const checkInTime = getCheckInTime(appointment.time);
 
   return (
@@ -139,6 +175,16 @@ function CurrentJourney({ appointment, onCheckIn }: { appointment: Appointment; 
             <Text style={styles.checkInText}>Check in</Text>
           </Pressable>
         </View>
+      </View>
+
+      <View style={styles.managementActions}>
+        <Pressable accessibilityRole="button" onPress={onReschedule} style={styles.rescheduleButton}>
+          <Icon name={{ ios: 'calendar.badge.clock', android: 'edit_calendar', web: 'edit_calendar' }} size={17} />
+          <Text style={styles.rescheduleButtonText}>Reschedule</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={onCancel} style={styles.cancelButton}>
+          <Text style={styles.cancelButtonText}>Cancel appointment</Text>
+        </Pressable>
       </View>
 
       <SectionHeader count="3 STEPS" title="Your visit timeline" />
@@ -294,6 +340,167 @@ function SectionHeader({ count, title }: { count: string; title: string }) {
   );
 }
 
+function RescheduleModal({
+  appointment,
+  onClose,
+  onSave,
+  visible,
+}: {
+  appointment: Appointment | null;
+  onClose: () => void;
+  onSave: (date: string, time: string) => Promise<void>;
+  visible: boolean;
+}) {
+  const [date, setDate] = useState(appointment?.date ?? appointmentDates[1].value);
+  const [time, setTime] = useState(appointment?.time ?? '11:10 AM');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (visible && appointment) {
+      setDate(appointment.date);
+      setTime(appointment.time);
+    }
+  }, [appointment, visible]);
+
+  if (!appointment) return null;
+
+  async function saveChanges() {
+    setSaving(true);
+    await onSave(date, time);
+    setSaving(false);
+  }
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalCard, styles.managementModalCard]}>
+          <Pressable accessibilityLabel="Close reschedule appointment" onPress={onClose} style={styles.modalClose}>
+            <Icon name={{ ios: 'xmark', android: 'close', web: 'close' }} color={colors.ink} size={20} />
+          </Pressable>
+          <View style={styles.modalIcon}>
+            <Icon name={{ ios: 'calendar.badge.clock', android: 'edit_calendar', web: 'edit_calendar' }} size={27} />
+          </View>
+          <Text style={styles.modalTitle}>Reschedule visit</Text>
+          <Text style={styles.modalCaption}>Choose another available time at {appointment.clinicName}.</Text>
+
+          <View style={styles.managementSectionHeader}>
+            <Text style={styles.managementSectionTitle}>Select date</Text>
+            <Text style={styles.managementSectionMeta}>August 2026</Text>
+          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rescheduleDateRow}>
+            {appointmentDates.map((item) => {
+              const selected = date === item.value;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
+                  key={item.value}
+                  onPress={() => setDate(item.value)}
+                  style={[styles.rescheduleDate, selected && styles.rescheduleDateSelected]}>
+                  <Text style={[styles.rescheduleDay, selected && styles.rescheduleTextSelected]}>{item.day}</Text>
+                  <Text style={[styles.rescheduleDateNumber, selected && styles.rescheduleTextSelected]}>{item.date}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+
+          <View style={styles.managementSectionHeader}>
+            <Text style={styles.managementSectionTitle}>Available times</Text>
+            <Text style={styles.managementSectionMeta}>GMT+8</Text>
+          </View>
+          <View style={styles.rescheduleTimeGrid}>
+            {appointmentTimes.map((item) => {
+              const selected = time === item.label;
+              return (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: !item.available, selected }}
+                  disabled={!item.available}
+                  key={item.label}
+                  onPress={() => setTime(item.label)}
+                  style={[
+                    styles.rescheduleTime,
+                    selected && styles.rescheduleTimeSelected,
+                    !item.available && styles.rescheduleTimeDisabled,
+                  ]}>
+                  <Text
+                    style={[
+                      styles.rescheduleTimeText,
+                      selected && styles.rescheduleTextSelected,
+                      !item.available && styles.rescheduleTimeTextDisabled,
+                    ]}>
+                    {item.label}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={saving}
+            onPress={() => void saveChanges()}
+            style={[styles.modalDone, saving && styles.modalButtonDisabled]}>
+            <Text style={styles.modalDoneText}>{saving ? 'Saving…' : 'Save new time'}</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function CancelAppointmentModal({
+  appointment,
+  onClose,
+  onConfirm,
+  visible,
+}: {
+  appointment: Appointment | null;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+  visible: boolean;
+}) {
+  const [cancelling, setCancelling] = useState(false);
+
+  if (!appointment) return null;
+
+  async function confirmCancellation() {
+    setCancelling(true);
+    await onConfirm();
+    setCancelling(false);
+  }
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalCard, styles.cancelModalCard]}>
+          <View style={styles.cancelModalIcon}>
+            <Icon name={{ ios: 'calendar.badge.minus', android: 'event_busy', web: 'event_busy' }} color="#B54A48" size={28} />
+          </View>
+          <Text style={styles.modalTitle}>Cancel appointment?</Text>
+          <Text style={styles.cancelModalCaption}>
+            Your {formatJourneyDate(appointment.date)} visit at {appointment.time} will be removed from Home and Journey.
+          </Text>
+          <View style={styles.cancellationNote}>
+            <Icon name={{ ios: 'info.circle.fill', android: 'info', web: 'info' }} color={colors.warm} size={17} />
+            <Text style={styles.cancellationNoteText}>This prototype has no cancellation fee.</Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={cancelling}
+            onPress={() => void confirmCancellation()}
+            style={[styles.confirmCancelButton, cancelling && styles.modalButtonDisabled]}>
+            <Text style={styles.confirmCancelText}>{cancelling ? 'Cancelling…' : 'Yes, cancel appointment'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={cancelling} onPress={onClose} style={styles.keepAppointmentButton}>
+            <Text style={styles.keepAppointmentText}>Keep appointment</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function CheckInModal({
   appointment,
   onClose,
@@ -423,6 +630,11 @@ const styles = StyleSheet.create({
   queueValue: { marginTop: 4, color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   checkInButton: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 13, backgroundColor: '#E9FAF5' },
   checkInText: { color: colors.tealDark, fontSize: 9, fontWeight: '800' },
+  managementActions: { flexDirection: 'row', gap: 9, marginTop: 12 },
+  rescheduleButton: { flex: 1, minHeight: 45, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, borderWidth: 1, borderColor: colors.teal, borderRadius: 15, backgroundColor: colors.card },
+  rescheduleButtonText: { color: colors.teal, fontSize: 9, fontWeight: '800' },
+  cancelButton: { flex: 1, minHeight: 45, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#F1CECB', borderRadius: 15, backgroundColor: '#FFF8F7' },
+  cancelButtonText: { color: '#A94745', fontSize: 9, fontWeight: '800' },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 26, marginBottom: 12 },
   sectionTitle: { color: colors.ink, fontSize: 16, fontWeight: '800' },
   sectionCount: { color: colors.muted, fontSize: 8, fontWeight: '800', letterSpacing: 0.6 },
@@ -462,10 +674,36 @@ const styles = StyleSheet.create({
   pastStatusText: { color: colors.warm, fontSize: 8, fontWeight: '800' },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22, backgroundColor: 'rgba(6,29,35,0.62)' },
   modalCard: { position: 'relative', width: '100%', maxWidth: 390, alignItems: 'center', padding: 24, borderRadius: 28, backgroundColor: colors.card },
+  managementModalCard: { maxWidth: 440, alignItems: 'stretch' },
+  cancelModalCard: { maxWidth: 370 },
   modalClose: { position: 'absolute', top: 15, right: 15, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#EDF4F2' },
   modalIcon: { width: 54, height: 54, alignItems: 'center', justifyContent: 'center', borderRadius: 18, backgroundColor: colors.tealSoft },
   modalTitle: { marginTop: 14, color: colors.ink, fontSize: 20, fontWeight: '800' },
   modalCaption: { maxWidth: 280, marginTop: 7, color: colors.muted, fontSize: 10, lineHeight: 15, textAlign: 'center' },
+  managementSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 21, marginBottom: 10 },
+  managementSectionTitle: { color: colors.ink, fontSize: 11, fontWeight: '800' },
+  managementSectionMeta: { color: colors.muted, fontSize: 8, fontWeight: '700' },
+  rescheduleDateRow: { gap: 8 },
+  rescheduleDate: { width: 58, minHeight: 64, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 17, backgroundColor: '#FAFCFB' },
+  rescheduleDateSelected: { borderColor: colors.teal, backgroundColor: colors.teal },
+  rescheduleDay: { color: colors.muted, fontSize: 7, fontWeight: '800' },
+  rescheduleDateNumber: { marginTop: 5, color: colors.ink, fontSize: 15, fontWeight: '800' },
+  rescheduleTextSelected: { color: '#FFFFFF' },
+  rescheduleTimeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  rescheduleTime: { width: '31%', minHeight: 40, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 13, backgroundColor: '#FAFCFB' },
+  rescheduleTimeSelected: { borderColor: colors.teal, backgroundColor: colors.teal },
+  rescheduleTimeDisabled: { backgroundColor: '#EFF3F2', opacity: 0.58 },
+  rescheduleTimeText: { color: colors.ink, fontSize: 8, fontWeight: '800' },
+  rescheduleTimeTextDisabled: { color: '#9AA9A8', textDecorationLine: 'line-through' },
+  modalButtonDisabled: { opacity: 0.55 },
+  cancelModalIcon: { width: 62, height: 62, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: '#FFF0EE' },
+  cancelModalCaption: { maxWidth: 290, marginTop: 9, color: colors.muted, fontSize: 10, lineHeight: 16, textAlign: 'center' },
+  cancellationNote: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 18, paddingHorizontal: 11, paddingVertical: 9, borderRadius: 14, backgroundColor: colors.warmSoft },
+  cancellationNoteText: { color: colors.warm, fontSize: 8, fontWeight: '700' },
+  confirmCancelButton: { width: '100%', minHeight: 48, alignItems: 'center', justifyContent: 'center', marginTop: 20, borderRadius: 16, backgroundColor: '#B54A48' },
+  confirmCancelText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  keepAppointmentButton: { width: '100%', minHeight: 46, alignItems: 'center', justifyContent: 'center', marginTop: 8, borderRadius: 15, backgroundColor: '#EFF4F3' },
+  keepAppointmentText: { color: colors.ink, fontSize: 10, fontWeight: '800' },
   qrCode: { width: 198, height: 198, flexDirection: 'row', flexWrap: 'wrap', marginTop: 20, padding: 11, borderWidth: 1, borderColor: colors.line, borderRadius: 18, backgroundColor: '#FFFFFF' },
   qrCell: { width: 16, height: 16, backgroundColor: '#FFFFFF' },
   qrCellFilled: { backgroundColor: colors.ink },
