@@ -12,6 +12,7 @@ import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
+import { ClinicOperationsScreen } from '@/features/operations/clinic-operations-screen';
 
 export default function AppTabs() {
   const pathname = usePathname();
@@ -20,6 +21,10 @@ export default function AppTabs() {
   // outside the custom tab slot also makes direct browser refreshes reliable.
   if (pathname === '/queue') {
     return <LiveQueueScreen />;
+  }
+
+  if (pathname === '/operations') {
+    return <ClinicOperationsScreen />;
   }
 
   return (
@@ -53,6 +58,7 @@ export default function AppTabs() {
             />
           </TabTrigger>
           <TabTrigger name="queue" href="/queue" style={styles.hiddenTab} />
+          <TabTrigger name="operations" href="/operations" style={styles.hiddenTab} />
         </ClinqueTabBar>
       </TabList>
     </Tabs>

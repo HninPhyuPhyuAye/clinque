@@ -1,8 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import type { ComponentProps, ReactNode } from 'react';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { clinics } from '@/features/clinics/clinic-data';
@@ -30,6 +31,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 }
 
 export function ProfileScreen() {
+  const router = useRouter();
   const [preferences, setPreferences] = useState(defaultPreferences);
   const [clinicPickerVisible, setClinicPickerVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
@@ -63,6 +65,14 @@ export function ProfileScreen() {
       void AsyncStorage.setItem(profileStorageKey, JSON.stringify(nextPreferences));
       return nextPreferences;
     });
+  }
+
+  function openOperations() {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.assign('/operations');
+      return;
+    }
+    router.push('/operations');
   }
 
   return (
@@ -169,6 +179,24 @@ export function ProfileScreen() {
               value={preferences.biometricUnlock}
             />
           </View>
+
+          <Pressable
+            accessibilityLabel="Open clinic operations demo"
+            accessibilityRole="button"
+            onPress={openOperations}
+            style={({ pressed }) => [styles.operationsCard, pressed && styles.operationsCardPressed]}>
+            <View style={styles.operationsIcon}>
+              <Icon name={{ ios: 'chart.bar.xaxis', android: 'monitoring', web: 'monitoring' }} color="#E9FAF6" size={23} />
+            </View>
+            <View style={styles.operationsContent}>
+              <View style={styles.operationsTitleRow}>
+                <Text style={styles.operationsTitle}>Clinic operations demo</Text>
+                <View style={styles.staffPill}><Text style={styles.staffPillText}>STAFF PORTAL</Text></View>
+              </View>
+              <Text style={styles.operationsCaption}>Run the live clinic queue and see patient updates synchronize instantly.</Text>
+            </View>
+            <Icon name={{ ios: 'arrow.up.right', android: 'north_east', web: 'north_east' }} color="#9DE1D1" size={18} />
+          </Pressable>
 
           <Pressable accessibilityRole="button" onPress={() => setPrivacyVisible(true)} style={styles.privacyCard}>
             <View style={styles.privacyIcon}>
@@ -420,6 +448,15 @@ const styles = StyleSheet.create({
   rowCaption: { marginTop: 4, color: colors.muted, fontSize: 8, lineHeight: 12 },
   divider: { height: 1, marginLeft: 70, backgroundColor: '#EAF1EF' },
   toggleRow: { flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: 68, paddingHorizontal: 15, paddingVertical: 12 },
+  operationsCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, padding: 16, borderRadius: 21, backgroundColor: colors.tealDark },
+  operationsCardPressed: { opacity: 0.82 },
+  operationsIcon: { width: 46, height: 46, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.12)' },
+  operationsContent: { flex: 1 },
+  operationsTitleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
+  operationsTitle: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  operationsCaption: { marginTop: 5, color: '#C7E6E0', fontSize: 8, lineHeight: 12 },
+  staffPill: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(157,225,209,0.16)' },
+  staffPillText: { color: '#9DE1D1', fontSize: 6, fontWeight: '900', letterSpacing: 0.6 },
   privacyCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, padding: 16, borderRadius: 21, backgroundColor: colors.tealSoft },
   privacyIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: colors.card },
   privacyContent: { flex: 1 },

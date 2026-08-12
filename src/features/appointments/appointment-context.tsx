@@ -55,6 +55,7 @@ type AppointmentContextValue = {
   advanceQueue: () => Promise<Appointment | null>;
   cancelAppointment: () => Promise<void>;
   completeConsultation: () => Promise<CompletedVisit | null>;
+  createDemoQueue: () => Promise<Appointment>;
   loading: boolean;
   saveAppointment: (clinic: Clinic, draft: BookingDraft) => Promise<Appointment>;
   startQueue: () => Promise<Appointment | null>;
@@ -148,6 +149,42 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         }
 
         return completedVisit;
+      },
+      createDemoQueue: async () => {
+        const demoAppointment = createAppointment(
+          {
+            id: 'novena-medical',
+            name: 'Novena Medical Clinic',
+            specialty: 'Family Medicine',
+            distance: 0.8,
+            closesAt: '9:00 PM',
+            rating: 4.9,
+            reviews: 284,
+            earliest: 'Today, 11:10 AM',
+            waitMinutes: 8,
+            categories: ['Nearby', 'Open now', 'GP'],
+            accent: 'teal',
+          },
+          {
+            date: 'Thu, 13 Aug 2026',
+            time: '11:10 AM',
+            reason: 'General consultation',
+          },
+        );
+        const now = new Date().toISOString();
+        const queuedAppointment: Appointment = {
+          ...demoAppointment,
+          queue: {
+            status: 'waiting',
+            position: 4,
+            estimatedMinutes: 12,
+            checkedInAt: now,
+            lastUpdatedAt: now,
+          },
+        };
+
+        await persistAppointment(queuedAppointment, setAppointment);
+        return queuedAppointment;
       },
       loading,
       saveAppointment: async (clinic, draft) => {

@@ -4,6 +4,7 @@ import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
 import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
+import { ClinicOperationsScreen } from '@/features/operations/clinic-operations-screen';
 
 export default function AppTabs() {
   const pathname = usePathname();
@@ -12,6 +13,10 @@ export default function AppTabs() {
 
   if (pathname === '/queue') {
     return <LiveQueueScreen />;
+  }
+
+  if (pathname === '/operations') {
+    return <ClinicOperationsScreen />;
   }
 
   return (
@@ -52,6 +57,7 @@ export default function AppTabs() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger hidden name="queue" />
+      <NativeTabs.Trigger hidden name="operations" />
     </NativeTabs>
   );
 }
