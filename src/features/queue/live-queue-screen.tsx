@@ -17,7 +17,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 
 export function LiveQueueScreen() {
   const router = useRouter();
-  const { advanceQueue, appointment, loading } = useAppointment();
+  const { advanceQueue, appointment, completeConsultation, loading } = useAppointment();
   const { addQueueAlert } = useNotifications();
   const [visibleAlert, setVisibleAlert] = useState<ClinqueNotification | null>(null);
 
@@ -184,6 +184,25 @@ export function LiveQueueScreen() {
               <Text style={styles.demoButtonText}>{called ? 'Patient has been called' : 'Advance queue by one'}</Text>
               {!called && <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={17} />}
             </Pressable>
+            {called && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={async () => {
+                  const completedVisit = await completeConsultation();
+                  if (!completedVisit) return;
+
+                  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+                    window.location.assign('/journey?tab=past');
+                    return;
+                  }
+
+                  router.replace({ pathname: '/journey', params: { tab: 'past' } });
+                }}
+                style={styles.completeVisitButton}>
+                <Icon name={{ ios: 'checkmark.seal.fill', android: 'task_alt', web: 'task_alt' }} color="#FFFFFF" size={18} />
+                <Text style={styles.completeVisitButtonText}>Complete consultation</Text>
+              </Pressable>
+            )}
           </View>
         </ScrollView>
       </SafeAreaView>
@@ -279,6 +298,8 @@ const styles = StyleSheet.create({
   demoButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, minHeight: 45, marginTop: 14, borderRadius: 15, backgroundColor: colors.teal },
   demoButtonDisabled: { backgroundColor: '#92A7A4' },
   demoButtonText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
+  completeVisitButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, minHeight: 47, marginTop: 10, borderRadius: 15, backgroundColor: colors.tealDark },
+  completeVisitButtonText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   emptySafeArea: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 },
   emptyCard: { width: '100%', maxWidth: 390, alignItems: 'center', padding: 30, borderWidth: 1, borderColor: colors.line, borderRadius: 26, backgroundColor: colors.card },
   emptyIcon: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: colors.tealSoft },

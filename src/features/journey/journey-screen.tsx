@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
+import { type Appointment, type CompletedVisit, useAppointment } from '@/features/appointments/appointment-context';
 import { appointmentDates, appointmentTimes } from '@/features/clinics/clinic-data';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
 
@@ -50,7 +50,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 export function JourneyScreen() {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
-  const { appointment, cancelAppointment, loading, startQueue, updateAppointment } = useAppointment();
+  const { appointment, cancelAppointment, loading, startQueue, updateAppointment, visitHistory } = useAppointment();
   const [activeTab, setActiveTab] = useState<JourneyTab>(tab === 'past' ? 'past' : 'current');
   const [qrVisible, setQrVisible] = useState(false);
   const [rescheduleVisible, setRescheduleVisible] = useState(false);
@@ -120,7 +120,7 @@ export function JourneyScreen() {
           {activeTab === 'current' && !loading && !appointment && (
             <EmptyJourney onBook={() => router.push('/explore')} />
           )}
-          {activeTab === 'past' && <PastJourney />}
+          {activeTab === 'past' && <PastJourney completedVisits={visitHistory} />}
         </ScrollView>
       </SafeAreaView>
 
@@ -285,39 +285,110 @@ function EmptyJourney({ onBook }: { onBook: () => void }) {
   );
 }
 
-function PastJourney() {
+function PastJourney({ completedVisits }: { completedVisits: CompletedVisit[] }) {
+  const [selectedVisit, setSelectedVisit] = useState<CompletedVisit | null>(null);
+  const visitCount = pastVisits.length + completedVisits.length;
+
   return (
-    <View style={styles.pastContent}>
-      <View style={styles.historySummary}>
-        <View style={styles.historySummaryIcon}>
-          <Icon name={{ ios: 'clock.arrow.circlepath', android: 'history', web: 'history' }} size={22} />
+    <>
+      <View style={styles.pastContent}>
+        <View style={styles.historySummary}>
+          <View style={styles.historySummaryIcon}>
+            <Icon name={{ ios: 'clock.arrow.circlepath', android: 'history', web: 'history' }} size={22} />
+          </View>
+          <View>
+            <Text style={styles.historySummaryTitle}>{visitCount} clinic visits this year</Text>
+            <Text style={styles.historySummaryCaption}>Your records stay organized by visit.</Text>
+          </View>
         </View>
-        <View>
-          <Text style={styles.historySummaryTitle}>2 clinic visits this year</Text>
-          <Text style={styles.historySummaryCaption}>Your records stay organized by visit.</Text>
+
+        <Text style={styles.yearLabel}>2026</Text>
+        <View style={styles.pastList}>
+          {completedVisits.map((visit) => (
+            <Pressable accessibilityRole="button" key={visit.id} onPress={() => setSelectedVisit(visit)} style={[styles.pastCard, styles.recentVisitCard]}>
+              <View style={styles.pastDateColumn}>
+                <Text style={styles.pastMonth}>{visit.date.split(' ')[1].toUpperCase()}</Text>
+                <Text style={styles.pastDay}>{visit.date.split(' ')[0]}</Text>
+              </View>
+              <View style={styles.pastMain}>
+                <View style={styles.newRecordPill}><Text style={styles.newRecordText}>NEW RECORD</Text></View>
+                <Text style={styles.pastTitle}>{visit.title}</Text>
+                <Text style={styles.pastClinic}>{visit.clinic}</Text>
+                <Text style={styles.pastDoctor}>{visit.doctor}</Text>
+                <View style={styles.pastStatusPill}>
+                  <View style={styles.pastStatusDot} />
+                  <Text style={styles.pastStatusText}>After-visit summary ready</Text>
+                </View>
+              </View>
+              <Icon name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} color="#9CB0B1" size={19} />
+            </Pressable>
+          ))}
+          {pastVisits.map((visit) => (
+            <Pressable key={visit.date} style={styles.pastCard}>
+              <View style={styles.pastDateColumn}>
+                <Text style={styles.pastMonth}>{visit.date.split(' ')[1].toUpperCase()}</Text>
+                <Text style={styles.pastDay}>{visit.date.split(' ')[0]}</Text>
+              </View>
+              <View style={styles.pastMain}>
+                <Text style={styles.pastTitle}>{visit.title}</Text>
+                <Text style={styles.pastClinic}>{visit.clinic}</Text>
+                <Text style={styles.pastDoctor}>{visit.doctor}</Text>
+                <View style={styles.pastStatusPill}>
+                  <View style={styles.pastStatusDot} />
+                  <Text style={styles.pastStatusText}>{visit.status}</Text>
+                </View>
+              </View>
+              <Icon name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} color="#9CB0B1" size={19} />
+            </Pressable>
+          ))}
         </View>
       </View>
+      <VisitSummaryModal onClose={() => setSelectedVisit(null)} visit={selectedVisit} />
+    </>
+  );
+}
 
-      <Text style={styles.yearLabel}>2026</Text>
-      <View style={styles.pastList}>
-        {pastVisits.map((visit) => (
-          <Pressable key={visit.date} style={styles.pastCard}>
-            <View style={styles.pastDateColumn}>
-              <Text style={styles.pastMonth}>{visit.date.split(' ')[1].toUpperCase()}</Text>
-              <Text style={styles.pastDay}>{visit.date.split(' ')[0]}</Text>
-            </View>
-            <View style={styles.pastMain}>
-              <Text style={styles.pastTitle}>{visit.title}</Text>
-              <Text style={styles.pastClinic}>{visit.clinic}</Text>
-              <Text style={styles.pastDoctor}>{visit.doctor}</Text>
-              <View style={styles.pastStatusPill}>
-                <View style={styles.pastStatusDot} />
-                <Text style={styles.pastStatusText}>{visit.status}</Text>
-              </View>
-            </View>
-            <Icon name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} color="#9CB0B1" size={19} />
+function VisitSummaryModal({ onClose, visit }: { onClose: () => void; visit: CompletedVisit | null }) {
+  if (!visit) return null;
+
+  return (
+    <Modal animationType="fade" onRequestClose={onClose} transparent visible>
+      <View style={styles.modalBackdrop}>
+        <View style={[styles.modalCard, styles.visitSummaryCard]}>
+          <Pressable accessibilityLabel="Close after-visit summary" onPress={onClose} style={styles.modalClose}>
+            <Icon name={{ ios: 'xmark', android: 'close', web: 'close' }} color={colors.ink} size={20} />
           </Pressable>
-        ))}
+          <View style={styles.summaryHeroIcon}>
+            <Icon name={{ ios: 'checkmark.seal.fill', android: 'task_alt', web: 'task_alt' }} color="#FFFFFF" size={28} />
+          </View>
+          <Text style={styles.summaryEyebrow}>AFTER-VISIT SUMMARY</Text>
+          <Text style={styles.modalTitle}>{visit.title}</Text>
+          <Text style={styles.modalCaption}>{visit.doctor} · {visit.clinic}</Text>
+          <View style={styles.summaryDetails}>
+            <SummaryRow icon={{ ios: 'stethoscope', android: 'medical_information', web: 'medical_information' }} label="Assessment" value={visit.diagnosis} />
+            <SummaryRow icon={{ ios: 'pills.fill', android: 'medication', web: 'medication' }} label="Medication" value={visit.medication} />
+            <SummaryRow icon={{ ios: 'calendar.badge.clock', android: 'event_repeat', web: 'event_repeat' }} label="Follow-up plan" value={visit.followUp} />
+          </View>
+          <View style={styles.summaryPrivacyNote}>
+            <Icon name={{ ios: 'lock.shield.fill', android: 'shield_lock', web: 'shield_lock' }} size={16} />
+            <Text style={styles.summaryPrivacyText}>Demo record stored only on this device.</Text>
+          </View>
+          <Pressable accessibilityRole="button" onPress={onClose} style={styles.modalDone}>
+            <Text style={styles.modalDoneText}>Done</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+function SummaryRow({ icon, label, value }: { icon: SymbolName; label: string; value: string }) {
+  return (
+    <View style={styles.summaryRow}>
+      <View style={styles.summaryRowIcon}><Icon name={icon} size={18} /></View>
+      <View style={styles.summaryRowContent}>
+        <Text style={styles.summaryRowLabel}>{label}</Text>
+        <Text style={styles.summaryRowValue}>{value}</Text>
       </View>
     </View>
   );
@@ -709,6 +780,9 @@ const styles = StyleSheet.create({
   yearLabel: { marginTop: 24, marginBottom: 10, color: colors.muted, fontSize: 9, fontWeight: '800', letterSpacing: 0.8 },
   pastList: { gap: 11 },
   pastCard: { flexDirection: 'row', alignItems: 'center', gap: 13, padding: 16, borderWidth: 1, borderColor: colors.line, borderRadius: 21, backgroundColor: colors.card },
+  recentVisitCard: { borderColor: '#B9DED7', backgroundColor: '#FBFFFE' },
+  newRecordPill: { alignSelf: 'flex-start', marginBottom: 6, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 9, backgroundColor: colors.tealSoft },
+  newRecordText: { color: colors.teal, fontSize: 6, fontWeight: '900', letterSpacing: 0.7 },
   pastDateColumn: { width: 44, height: 52, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: colors.tealSoft },
   pastMonth: { color: colors.teal, fontSize: 8, fontWeight: '800' },
   pastDay: { marginTop: 3, color: colors.ink, fontSize: 16, fontWeight: '800' },
@@ -721,6 +795,17 @@ const styles = StyleSheet.create({
   pastStatusText: { color: colors.warm, fontSize: 8, fontWeight: '800' },
   modalBackdrop: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22, backgroundColor: 'rgba(6,29,35,0.62)' },
   modalCard: { position: 'relative', width: '100%', maxWidth: 390, alignItems: 'center', padding: 24, borderRadius: 28, backgroundColor: colors.card },
+  visitSummaryCard: { maxWidth: 430, alignItems: 'stretch' },
+  summaryHeroIcon: { width: 62, height: 62, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', borderRadius: 21, backgroundColor: colors.teal },
+  summaryEyebrow: { alignSelf: 'center', marginTop: 16, color: colors.teal, fontSize: 7, fontWeight: '900', letterSpacing: 1 },
+  summaryDetails: { gap: 10, marginTop: 20 },
+  summaryRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, padding: 13, borderRadius: 17, backgroundColor: colors.background },
+  summaryRowIcon: { width: 39, height: 39, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: colors.tealSoft },
+  summaryRowContent: { flex: 1 },
+  summaryRowLabel: { color: colors.muted, fontSize: 7, fontWeight: '900', letterSpacing: 0.6, textTransform: 'uppercase' },
+  summaryRowValue: { marginTop: 5, color: colors.ink, fontSize: 9, lineHeight: 14, fontWeight: '700' },
+  summaryPrivacyNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 14 },
+  summaryPrivacyText: { color: colors.muted, fontSize: 7 },
   managementModalCard: { maxWidth: 440, alignItems: 'stretch' },
   cancelModalCard: { maxWidth: 370 },
   modalClose: { position: 'absolute', top: 15, right: 15, width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: '#EDF4F2' },

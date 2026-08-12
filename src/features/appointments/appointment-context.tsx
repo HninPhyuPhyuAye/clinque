@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useState
 import type { BookingDraft, Clinic } from '@/features/clinics/clinic-data';
 
 const appointmentStorageKey = '@clinque/current-appointment';
+const visitHistoryStorageKey = '@clinque/visit-history';
 
 export type Appointment = {
   id: string;
@@ -28,20 +29,36 @@ export type QueueState = {
   lastUpdatedAt: string;
 };
 
+export type CompletedVisit = {
+  id: string;
+  date: string;
+  title: string;
+  clinic: string;
+  doctor: string;
+  specialty: string;
+  completedAt: string;
+  diagnosis: string;
+  medication: string;
+  followUp: string;
+};
+
 type AppointmentContextValue = {
   appointment: Appointment | null;
   advanceQueue: () => Promise<Appointment | null>;
   cancelAppointment: () => Promise<void>;
+  completeConsultation: () => Promise<CompletedVisit | null>;
   loading: boolean;
   saveAppointment: (clinic: Clinic, draft: BookingDraft) => Promise<Appointment>;
   startQueue: () => Promise<Appointment | null>;
   updateAppointment: (draft: Pick<BookingDraft, 'date' | 'time'>) => Promise<Appointment | null>;
+  visitHistory: CompletedVisit[];
 };
 
 const AppointmentContext = createContext<AppointmentContextValue | null>(null);
 
 export function AppointmentProvider({ children }: { children: ReactNode }) {
   const [appointment, setAppointment] = useState<Appointment | null>(null);
+  const [visitHistory, setVisitHistory] = useState<CompletedVisit[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -49,9 +66,15 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
 
     async function loadAppointment() {
       try {
-        const savedAppointment = await AsyncStorage.getItem(appointmentStorageKey);
+        const [savedAppointment, savedVisitHistory] = await Promise.all([
+          AsyncStorage.getItem(appointmentStorageKey),
+          AsyncStorage.getItem(visitHistoryStorageKey),
+        ]);
         if (savedAppointment && active) {
           setAppointment(JSON.parse(savedAppointment) as Appointment);
+        }
+        if (savedVisitHistory && active) {
+          setVisitHistory(JSON.parse(savedVisitHistory) as CompletedVisit[]);
         }
       } catch {
         // A corrupt local value should not prevent the rest of Clinque from loading.
@@ -96,6 +119,25 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         } catch {
           // Keep the appointment cancelled for the current session if device storage is unavailable.
         }
+      },
+      completeConsultation: async () => {
+        if (!appointment?.queue || appointment.queue.status !== 'called') return null;
+
+        const completedVisit = createCompletedVisit(appointment);
+        const nextVisitHistory = [completedVisit, ...visitHistory];
+
+        setAppointment(null);
+        setVisitHistory(nextVisitHistory);
+        try {
+          await Promise.all([
+            AsyncStorage.removeItem(appointmentStorageKey),
+            AsyncStorage.setItem(visitHistoryStorageKey, JSON.stringify(nextVisitHistory)),
+          ]);
+        } catch {
+          // Keep the completed visit available for the current session if storage is unavailable.
+        }
+
+        return completedVisit;
       },
       loading,
       saveAppointment: async (clinic, draft) => {
@@ -143,8 +185,9 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
 
         return updatedAppointment;
       },
+      visitHistory,
     }),
-    [appointment, loading],
+    [appointment, loading, visitHistory],
   );
 
   return <AppointmentContext.Provider value={value}>{children}</AppointmentContext.Provider>;
@@ -187,6 +230,21 @@ function createAppointment(clinic: Clinic, draft: BookingDraft): Appointment {
     reason: draft.reason,
     waitMinutes: clinic.waitMinutes,
     bookedAt: new Date().toISOString(),
+  };
+}
+
+function createCompletedVisit(appointment: Appointment): CompletedVisit {
+  return {
+    id: `${appointment.id}-completed`,
+    date: new Intl.DateTimeFormat('en-SG', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date()),
+    title: appointment.reason === 'Health screening' ? 'Health screening' : 'Family medicine consultation',
+    clinic: appointment.clinicName,
+    doctor: appointment.doctorName,
+    specialty: appointment.specialty,
+    completedAt: new Date().toISOString(),
+    diagnosis: 'Upper respiratory tract infection',
+    medication: 'Paracetamol 500 mg · Take when needed',
+    followUp: 'Monitor symptoms for 3 days. Return if fever persists.',
   };
 }
 
