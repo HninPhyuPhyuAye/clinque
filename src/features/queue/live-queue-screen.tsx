@@ -1,11 +1,13 @@
 import { SymbolView } from 'expo-symbols';
 import { useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
+import { useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppointment } from '@/features/appointments/appointment-context';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
+import { type ClinqueNotification, useNotifications } from '@/features/notifications/notification-context';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -16,6 +18,8 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 export function LiveQueueScreen() {
   const router = useRouter();
   const { advanceQueue, appointment, loading } = useAppointment();
+  const { addQueueAlert } = useNotifications();
+  const [visibleAlert, setVisibleAlert] = useState<ClinqueNotification | null>(null);
 
   function returnHome() {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -67,6 +71,26 @@ export function LiveQueueScreen() {
     <View style={styles.screen}>
       <SafeAreaView edges={['top']} style={styles.safeArea}>
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {visibleAlert && (
+            <View style={[styles.alertBanner, visibleAlert.type === 'doctor-ready' && styles.alertBannerReady]}>
+              <View style={styles.alertBannerIcon}>
+                <Icon
+                  name={visibleAlert.type === 'doctor-ready'
+                    ? { ios: 'door.left.hand.open', android: 'meeting_room', web: 'meeting_room' }
+                    : { ios: 'bell.badge.fill', android: 'notifications_active', web: 'notifications_active' }}
+                  color="#FFFFFF"
+                  size={20}
+                />
+              </View>
+              <View style={styles.alertBannerContent}>
+                <Text style={styles.alertBannerTitle}>{visibleAlert.title}</Text>
+                <Text style={styles.alertBannerMessage}>{visibleAlert.message}</Text>
+              </View>
+              <Pressable accessibilityLabel="Dismiss alert" onPress={() => setVisibleAlert(null)}>
+                <Icon name={{ ios: 'xmark', android: 'close', web: 'close' }} color="#FFFFFF" size={17} />
+              </Pressable>
+            </View>
+          )}
           <View style={styles.navigation}>
             <Pressable accessibilityLabel="Back to Home" onPress={returnHome} style={styles.backButton}>
               <Icon name={{ ios: 'arrow.left', android: 'arrow_back', web: 'arrow_back' }} color={colors.ink} size={19} />
@@ -149,7 +173,13 @@ export function LiveQueueScreen() {
             <Pressable
               accessibilityRole="button"
               disabled={called}
-              onPress={() => void advanceQueue()}
+              onPress={async () => {
+                const updatedAppointment = await advanceQueue();
+                if (updatedAppointment) {
+                  const alert = await addQueueAlert(updatedAppointment);
+                  if (alert) setVisibleAlert(alert);
+                }
+              }}
               style={[styles.demoButton, called && styles.demoButtonDisabled]}>
               <Text style={styles.demoButtonText}>{called ? 'Patient has been called' : 'Advance queue by one'}</Text>
               {!called && <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={17} />}
@@ -183,6 +213,12 @@ function formatTime(isoDate: string) {
 
 const styles = StyleSheet.create({
   screen: { flex: 1, backgroundColor: colors.background },
+  alertBanner: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 14, padding: 14, borderRadius: 19, backgroundColor: colors.blue },
+  alertBannerReady: { backgroundColor: colors.tealDark },
+  alertBannerIcon: { width: 40, height: 40, alignItems: 'center', justifyContent: 'center', borderRadius: 13, backgroundColor: 'rgba(255,255,255,0.16)' },
+  alertBannerContent: { flex: 1 },
+  alertBannerTitle: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  alertBannerMessage: { marginTop: 3, color: 'rgba(255,255,255,0.82)', fontSize: 8, lineHeight: 12 },
   loadingSafeArea: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 22 },
   loadingMark: { width: 56, height: 56, alignItems: 'center', justifyContent: 'center', borderRadius: 19, backgroundColor: colors.teal },
   loadingLetter: { color: '#FFFFFF', fontSize: 25, fontWeight: '900' },

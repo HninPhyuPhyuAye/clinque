@@ -1,10 +1,12 @@
 import { SymbolView } from 'expo-symbols';
 import { useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
+import { type ClinqueNotification, useNotifications } from '@/features/notifications/notification-context';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -55,6 +57,8 @@ const quickActions: Array<{
 export default function HomeScreen() {
   const router = useRouter();
   const { appointment, loading } = useAppointment();
+  const { markAllRead, notifications, unreadCount } = useNotifications();
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
 
   function openQueue() {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -91,13 +95,23 @@ export default function HomeScreen() {
               <Text style={styles.greeting}>Maya</Text>
             </View>
 
-            <Pressable accessibilityLabel="Open notifications" style={styles.notificationButton}>
+            <Pressable
+              accessibilityLabel="Open notifications"
+              onPress={() => {
+                setNotificationsVisible(true);
+                void markAllRead();
+              }}
+              style={styles.notificationButton}>
               <Icon
                 name={{ ios: 'bell', android: 'notifications', web: 'notifications' }}
                 color={colors.ink}
                 size={21}
               />
-              <View style={styles.notificationDot} />
+              {unreadCount > 0 && (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>{unreadCount}</Text>
+                </View>
+              )}
             </Pressable>
           </View>
 
@@ -173,8 +187,70 @@ export default function HomeScreen() {
           </View>
         </ScrollView>
       </SafeAreaView>
+      <NotificationInbox
+        notifications={notifications}
+        onClose={() => setNotificationsVisible(false)}
+        visible={notificationsVisible}
+      />
     </View>
   );
+}
+
+function NotificationInbox({ notifications, onClose, visible }: { notifications: ClinqueNotification[]; onClose: () => void; visible: boolean }) {
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalBackdrop}>
+        <Pressable accessibilityLabel="Close notifications" onPress={onClose} style={styles.modalDismissArea} />
+        <SafeAreaView edges={['bottom']} style={styles.notificationSheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.notificationSheetHeader}>
+            <View>
+              <Text style={styles.sheetEyebrow}>CARE UPDATES</Text>
+              <Text style={styles.sheetTitle}>Notifications</Text>
+            </View>
+            <Pressable accessibilityLabel="Close notification inbox" onPress={onClose} style={styles.sheetCloseButton}>
+              <Icon name={{ ios: 'xmark', android: 'close', web: 'close' }} color={colors.ink} size={18} />
+            </Pressable>
+          </View>
+
+          {notifications.length === 0 ? (
+            <View style={styles.emptyInbox}>
+              <View style={styles.emptyInboxIcon}>
+                <Icon name={{ ios: 'bell.slash.fill', android: 'notifications_off', web: 'notifications_off' }} size={26} />
+              </View>
+              <Text style={styles.emptyInboxTitle}>You’re all caught up</Text>
+              <Text style={styles.emptyInboxCaption}>Queue and appointment updates will appear here.</Text>
+            </View>
+          ) : (
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.notificationList}>
+              {notifications.map((notification) => (
+                <View key={notification.id} style={styles.notificationItem}>
+                  <View style={[styles.notificationItemIcon, notification.type === 'doctor-ready' && styles.notificationItemIconReady]}>
+                    <Icon
+                      name={notification.type === 'doctor-ready'
+                        ? { ios: 'door.left.hand.open', android: 'meeting_room', web: 'meeting_room' }
+                        : { ios: 'bell.badge.fill', android: 'notifications_active', web: 'notifications_active' }}
+                      color={notification.type === 'doctor-ready' ? '#FFFFFF' : colors.teal}
+                      size={19}
+                    />
+                  </View>
+                  <View style={styles.notificationItemContent}>
+                    <Text style={styles.notificationItemTitle}>{notification.title}</Text>
+                    <Text style={styles.notificationItemMessage}>{notification.message}</Text>
+                    <Text style={styles.notificationItemTime}>{formatNotificationTime(notification.createdAt)}</Text>
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          )}
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+function formatNotificationTime(isoDate: string) {
+  return new Intl.DateTimeFormat('en-SG', { hour: 'numeric', minute: '2-digit' }).format(new Date(isoDate));
 }
 
 function HomeAppointmentCard({ appointment, onAction }: { appointment: Appointment; onAction: () => void }) {
@@ -317,17 +393,28 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.card,
   },
-  notificationDot: {
-    position: 'absolute',
-    top: 10,
-    right: 11,
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    borderWidth: 1.5,
-    borderColor: colors.card,
-    backgroundColor: '#F28C74',
-  },
+  notificationBadge: { position: 'absolute', top: 4, right: 4, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: colors.card, borderRadius: 9, backgroundColor: '#E66A58' },
+  notificationBadgeText: { color: '#FFFFFF', fontSize: 8, fontWeight: '900' },
+  modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(10,35,39,0.38)' },
+  modalDismissArea: { flex: 1 },
+  notificationSheet: { width: '100%', maxHeight: '72%', alignSelf: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18, borderTopLeftRadius: 30, borderTopRightRadius: 30, backgroundColor: colors.card },
+  sheetHandle: { width: 42, height: 5, alignSelf: 'center', borderRadius: 3, backgroundColor: '#D9E5E3' },
+  notificationSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 17 },
+  sheetEyebrow: { color: colors.teal, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
+  sheetTitle: { marginTop: 4, color: colors.ink, fontSize: 23, fontWeight: '800' },
+  sheetCloseButton: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.line, borderRadius: 14, backgroundColor: colors.background },
+  emptyInbox: { alignItems: 'center', paddingVertical: 35 },
+  emptyInboxIcon: { width: 60, height: 60, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: colors.tealSoft },
+  emptyInboxTitle: { marginTop: 15, color: colors.ink, fontSize: 16, fontWeight: '800' },
+  emptyInboxCaption: { marginTop: 6, color: colors.muted, fontSize: 9, textAlign: 'center' },
+  notificationList: { gap: 11, paddingBottom: 10 },
+  notificationItem: { flexDirection: 'row', gap: 12, padding: 14, borderWidth: 1, borderColor: colors.line, borderRadius: 20, backgroundColor: colors.background },
+  notificationItemIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: colors.tealSoft },
+  notificationItemIconReady: { backgroundColor: colors.teal },
+  notificationItemContent: { flex: 1 },
+  notificationItemTitle: { color: colors.ink, fontSize: 11, fontWeight: '800' },
+  notificationItemMessage: { marginTop: 4, color: colors.muted, fontSize: 8, lineHeight: 13 },
+  notificationItemTime: { marginTop: 7, color: colors.teal, fontSize: 7, fontWeight: '800' },
   appointmentCard: {
     position: 'relative',
     overflow: 'hidden',
