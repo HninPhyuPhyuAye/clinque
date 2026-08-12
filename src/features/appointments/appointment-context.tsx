@@ -40,6 +40,14 @@ export type CompletedVisit = {
   diagnosis: string;
   medication: string;
   followUp: string;
+  careTasks: CareTask[];
+};
+
+export type CareTask = {
+  id: 'medication' | 'hydration' | 'symptoms';
+  title: string;
+  caption: string;
+  completed: boolean;
 };
 
 type AppointmentContextValue = {
@@ -50,6 +58,7 @@ type AppointmentContextValue = {
   loading: boolean;
   saveAppointment: (clinic: Clinic, draft: BookingDraft) => Promise<Appointment>;
   startQueue: () => Promise<Appointment | null>;
+  toggleCareTask: (visitId: string, taskId: CareTask['id']) => Promise<void>;
   updateAppointment: (draft: Pick<BookingDraft, 'date' | 'time'>) => Promise<Appointment | null>;
   visitHistory: CompletedVisit[];
 };
@@ -74,7 +83,8 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
           setAppointment(JSON.parse(savedAppointment) as Appointment);
         }
         if (savedVisitHistory && active) {
-          setVisitHistory(JSON.parse(savedVisitHistory) as CompletedVisit[]);
+          const savedVisits = JSON.parse(savedVisitHistory) as Array<CompletedVisit & { careTasks?: CareTask[] }>;
+          setVisitHistory(savedVisits.map((visit) => ({ ...visit, careTasks: visit.careTasks ?? createCareTasks() })));
         }
       } catch {
         // A corrupt local value should not prevent the rest of Clinque from loading.
@@ -171,6 +181,25 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         await persistAppointment(updatedAppointment, setAppointment);
         return updatedAppointment;
       },
+      toggleCareTask: async (visitId, taskId) => {
+        const nextVisitHistory = visitHistory.map((visit) =>
+          visit.id === visitId
+            ? {
+                ...visit,
+                careTasks: visit.careTasks.map((task) =>
+                  task.id === taskId ? { ...task, completed: !task.completed } : task,
+                ),
+              }
+            : visit,
+        );
+
+        setVisitHistory(nextVisitHistory);
+        try {
+          await AsyncStorage.setItem(visitHistoryStorageKey, JSON.stringify(nextVisitHistory));
+        } catch {
+          // Keep progress available for the current session if storage is unavailable.
+        }
+      },
       updateAppointment: async (draft) => {
         if (!appointment) return null;
 
@@ -245,7 +274,31 @@ function createCompletedVisit(appointment: Appointment): CompletedVisit {
     diagnosis: 'Upper respiratory tract infection',
     medication: 'Paracetamol 500 mg · Take when needed',
     followUp: 'Monitor symptoms for 3 days. Return if fever persists.',
+    careTasks: createCareTasks(),
   };
+}
+
+function createCareTasks(): CareTask[] {
+  return [
+    {
+      id: 'medication',
+      title: 'Medication check',
+      caption: 'Take paracetamol only when needed and follow the label.',
+      completed: false,
+    },
+    {
+      id: 'hydration',
+      title: 'Stay hydrated',
+      caption: 'Aim for regular fluids throughout the day.',
+      completed: false,
+    },
+    {
+      id: 'symptoms',
+      title: 'Review symptoms',
+      caption: 'Check your temperature and note whether symptoms improve.',
+      completed: false,
+    },
+  ];
 }
 
 function toTwentyFourHour(time: string) {

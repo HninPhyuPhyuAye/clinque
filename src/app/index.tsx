@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
+import { type Appointment, type CareTask, type CompletedVisit, useAppointment } from '@/features/appointments/appointment-context';
 import { type ClinqueNotification, useNotifications } from '@/features/notifications/notification-context';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -56,9 +56,11 @@ const quickActions: Array<{
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { appointment, loading } = useAppointment();
+  const { appointment, loading, toggleCareTask, visitHistory } = useAppointment();
   const { markAllRead, notifications, unreadCount } = useNotifications();
   const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [carePlanVisible, setCarePlanVisible] = useState(false);
+  const latestVisit = visitHistory[0];
 
   function openQueue() {
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -123,6 +125,10 @@ export default function HomeScreen() {
             />
           )}
           {!loading && !appointment && <EmptyAppointmentCard onBook={() => router.push('/explore')} />}
+
+          {latestVisit && (
+            <RecoveryPlanCard onOpen={() => setCarePlanVisible(true)} visit={latestVisit} />
+          )}
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>How can we help?</Text>
@@ -192,7 +198,118 @@ export default function HomeScreen() {
         onClose={() => setNotificationsVisible(false)}
         visible={notificationsVisible}
       />
+      <CarePlanModal
+        onClose={() => setCarePlanVisible(false)}
+        onToggle={(taskId) => void toggleCareTask(latestVisit?.id ?? '', taskId)}
+        visible={carePlanVisible}
+        visit={latestVisit}
+      />
     </View>
+  );
+}
+
+function RecoveryPlanCard({ onOpen, visit }: { onOpen: () => void; visit: CompletedVisit }) {
+  const completedCount = visit.careTasks.filter((task) => task.completed).length;
+  const progress = completedCount / visit.careTasks.length;
+
+  return (
+    <Pressable accessibilityRole="button" onPress={onOpen} style={styles.recoveryCard}>
+      <View style={styles.recoveryHeader}>
+        <View style={styles.recoveryIcon}>
+          <Icon name={{ ios: 'heart.text.square.fill', android: 'health_and_safety', web: 'health_and_safety' }} color="#FFFFFF" size={21} />
+        </View>
+        <View style={styles.recoveryCopy}>
+          <Text style={styles.recoveryEyebrow}>ACTIVE CARE PLAN</Text>
+          <Text style={styles.recoveryTitle}>Recovery after your visit</Text>
+          <Text style={styles.recoveryCaption}>{visit.clinic}</Text>
+        </View>
+        <Icon name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }} color="#FFFFFF" size={19} />
+      </View>
+      <View style={styles.recoveryProgressTrack}>
+        <View style={[styles.recoveryProgressFill, { width: `${progress * 100}%` }]} />
+      </View>
+      <View style={styles.recoveryFooter}>
+        <Text style={styles.recoveryProgressText}>{completedCount} of {visit.careTasks.length} tasks complete</Text>
+        <Text style={styles.recoveryAction}>View plan</Text>
+      </View>
+    </Pressable>
+  );
+}
+
+function CarePlanModal({
+  onClose,
+  onToggle,
+  visible,
+  visit,
+}: {
+  onClose: () => void;
+  onToggle: (taskId: CareTask['id']) => void;
+  visible: boolean;
+  visit?: CompletedVisit;
+}) {
+  if (!visit) return null;
+
+  const completedCount = visit.careTasks.filter((task) => task.completed).length;
+
+  return (
+    <Modal animationType="slide" onRequestClose={onClose} transparent visible={visible}>
+      <View style={styles.modalBackdrop}>
+        <Pressable accessibilityLabel="Close care plan" onPress={onClose} style={styles.modalDismissArea} />
+        <SafeAreaView edges={['bottom']} style={styles.carePlanSheet}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.notificationSheetHeader}>
+            <View>
+              <Text style={styles.sheetEyebrow}>AFTER-VISIT CARE</Text>
+              <Text style={styles.sheetTitle}>Recovery plan</Text>
+            </View>
+            <Pressable accessibilityLabel="Close recovery plan" onPress={onClose} style={styles.sheetCloseButton}>
+              <Icon name={{ ios: 'xmark', android: 'close', web: 'close' }} color={colors.ink} size={18} />
+            </Pressable>
+          </View>
+
+          <View style={styles.carePlanSummary}>
+            <View style={styles.carePlanSummaryIcon}>
+              <Icon name={{ ios: 'stethoscope', android: 'medical_information', web: 'medical_information' }} size={21} />
+            </View>
+            <View style={styles.carePlanSummaryCopy}>
+              <Text style={styles.carePlanDiagnosis}>{visit.diagnosis}</Text>
+              <Text style={styles.carePlanDoctor}>{visit.doctor} · {visit.clinic}</Text>
+            </View>
+            <Text style={styles.carePlanCount}>{completedCount}/{visit.careTasks.length}</Text>
+          </View>
+
+          <Text style={styles.carePlanSectionTitle}>Today’s checklist</Text>
+          <View style={styles.careTaskList}>
+            {visit.careTasks.map((task) => (
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{ checked: task.completed }}
+                key={task.id}
+                onPress={() => onToggle(task.id)}
+                style={[styles.careTask, task.completed && styles.careTaskComplete]}>
+                <View style={[styles.careTaskCheckbox, task.completed && styles.careTaskCheckboxComplete]}>
+                  {task.completed && <Icon name={{ ios: 'checkmark', android: 'check', web: 'check' }} color="#FFFFFF" size={14} />}
+                </View>
+                <View style={styles.careTaskCopy}>
+                  <Text style={[styles.careTaskTitle, task.completed && styles.careTaskTitleComplete]}>{task.title}</Text>
+                  <Text style={styles.careTaskCaption}>{task.caption}</Text>
+                </View>
+              </Pressable>
+            ))}
+          </View>
+
+          {completedCount === visit.careTasks.length && (
+            <View style={styles.careCompleteBanner}>
+              <Icon name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} color={colors.teal} size={21} />
+              <View style={styles.careCompleteCopy}>
+                <Text style={styles.careCompleteTitle}>Today’s care is complete</Text>
+                <Text style={styles.careCompleteCaption}>Keep monitoring your symptoms and rest well.</Text>
+              </View>
+            </View>
+          )}
+        </SafeAreaView>
+      </View>
+    </Modal>
   );
 }
 
@@ -395,9 +512,22 @@ const styles = StyleSheet.create({
   },
   notificationBadge: { position: 'absolute', top: 4, right: 4, minWidth: 18, height: 18, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4, borderWidth: 2, borderColor: colors.card, borderRadius: 9, backgroundColor: '#E66A58' },
   notificationBadgeText: { color: '#FFFFFF', fontSize: 8, fontWeight: '900' },
+  recoveryCard: { marginTop: 16, padding: 17, borderRadius: 23, backgroundColor: '#315D69' },
+  recoveryHeader: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  recoveryIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: 'rgba(255,255,255,0.14)' },
+  recoveryCopy: { flex: 1 },
+  recoveryEyebrow: { color: '#A9DDD5', fontSize: 7, fontWeight: '900', letterSpacing: 0.8 },
+  recoveryTitle: { marginTop: 4, color: '#FFFFFF', fontSize: 12, fontWeight: '800' },
+  recoveryCaption: { marginTop: 3, color: 'rgba(255,255,255,0.68)', fontSize: 8 },
+  recoveryProgressTrack: { overflow: 'hidden', height: 6, marginTop: 16, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.16)' },
+  recoveryProgressFill: { height: '100%', borderRadius: 3, backgroundColor: '#9EE2D4' },
+  recoveryFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 9 },
+  recoveryProgressText: { color: 'rgba(255,255,255,0.72)', fontSize: 8 },
+  recoveryAction: { color: '#C7F2E9', fontSize: 8, fontWeight: '800' },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(10,35,39,0.38)' },
   modalDismissArea: { flex: 1 },
   notificationSheet: { width: '100%', maxHeight: '72%', alignSelf: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18, borderTopLeftRadius: 30, borderTopRightRadius: 30, backgroundColor: colors.card },
+  carePlanSheet: { width: '100%', maxHeight: '82%', alignSelf: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 20, borderTopLeftRadius: 30, borderTopRightRadius: 30, backgroundColor: colors.card },
   sheetHandle: { width: 42, height: 5, alignSelf: 'center', borderRadius: 3, backgroundColor: '#D9E5E3' },
   notificationSheetHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 18, marginBottom: 17 },
   sheetEyebrow: { color: colors.teal, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
@@ -415,6 +545,26 @@ const styles = StyleSheet.create({
   notificationItemTitle: { color: colors.ink, fontSize: 11, fontWeight: '800' },
   notificationItemMessage: { marginTop: 4, color: colors.muted, fontSize: 8, lineHeight: 13 },
   notificationItemTime: { marginTop: 7, color: colors.teal, fontSize: 7, fontWeight: '800' },
+  carePlanSummary: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14, borderRadius: 19, backgroundColor: colors.tealSoft },
+  carePlanSummaryIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: colors.card },
+  carePlanSummaryCopy: { flex: 1 },
+  carePlanDiagnosis: { color: colors.ink, fontSize: 10, fontWeight: '800' },
+  carePlanDoctor: { marginTop: 4, color: colors.muted, fontSize: 8 },
+  carePlanCount: { color: colors.teal, fontSize: 16, fontWeight: '900' },
+  carePlanSectionTitle: { marginTop: 22, marginBottom: 11, color: colors.ink, fontSize: 14, fontWeight: '800' },
+  careTaskList: { gap: 10 },
+  careTask: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderWidth: 1, borderColor: colors.line, borderRadius: 19, backgroundColor: colors.card },
+  careTaskComplete: { borderColor: '#BCE2DA', backgroundColor: '#F5FCFA' },
+  careTaskCheckbox: { width: 28, height: 28, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#B8C8C6', borderRadius: 10, backgroundColor: colors.card },
+  careTaskCheckboxComplete: { borderColor: colors.teal, backgroundColor: colors.teal },
+  careTaskCopy: { flex: 1 },
+  careTaskTitle: { color: colors.ink, fontSize: 10, fontWeight: '800' },
+  careTaskTitleComplete: { color: colors.teal },
+  careTaskCaption: { marginTop: 4, color: colors.muted, fontSize: 8, lineHeight: 12 },
+  careCompleteBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 13, padding: 14, borderRadius: 18, backgroundColor: colors.tealSoft },
+  careCompleteCopy: { flex: 1 },
+  careCompleteTitle: { color: colors.ink, fontSize: 10, fontWeight: '800' },
+  careCompleteCaption: { marginTop: 3, color: colors.muted, fontSize: 8 },
   appointmentCard: {
     position: 'relative',
     overflow: 'hidden',
