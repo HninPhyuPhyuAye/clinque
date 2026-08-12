@@ -6,6 +6,7 @@ import { useEffect, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/features/auth/auth-context';
 import { clinics } from '@/features/clinics/clinic-data';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
 
@@ -32,12 +33,23 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 
 export function ProfileScreen() {
   const router = useRouter();
+  const { isDemo, signOut, user } = useAuth();
   const [preferences, setPreferences] = useState(defaultPreferences);
   const [clinicPickerVisible, setClinicPickerVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
   const [detailsVisible, setDetailsVisible] = useState(false);
 
   const preferredClinic = clinics.find((clinic) => clinic.id === preferences.preferredClinicId) ?? clinics[0];
+  const authenticatedName = typeof user?.user_metadata.full_name === 'string'
+    ? user.user_metadata.full_name
+    : user?.email?.split('@')[0];
+  const displayName = isDemo ? 'Maya Tan' : authenticatedName || 'Clinque patient';
+  const initials = displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
 
   useEffect(() => {
     let active = true;
@@ -86,20 +98,20 @@ export function ProfileScreen() {
             </View>
             <View style={styles.demoPill}>
               <View style={styles.demoDot} />
-              <Text style={styles.demoText}>DEMO PROFILE</Text>
+              <Text style={styles.demoText}>{isDemo ? 'DEMO PROFILE' : 'SECURE ACCOUNT'}</Text>
             </View>
           </View>
 
           <View style={styles.profileHero}>
             <View style={styles.profileGlow} />
-            <View style={styles.avatar}><Text style={styles.avatarText}>MT</Text></View>
+            <View style={styles.avatar}><Text style={styles.avatarText}>{initials || 'C'}</Text></View>
             <View style={styles.profileIdentity}>
               <View style={styles.nameRow}>
-                <Text style={styles.profileName}>Maya Tan</Text>
+                <Text style={styles.profileName}>{displayName}</Text>
                 <Icon name={{ ios: 'checkmark.seal.fill', android: 'verified', web: 'verified' }} color="#9DE1D1" size={18} />
               </View>
-              <Text style={styles.profileMeta}>Patient ID · CQ-20418</Text>
-              <Text style={styles.profileMeta}>Singapore · English</Text>
+              <Text style={styles.profileMeta}>{isDemo ? 'Patient ID · CQ-20418' : user?.email}</Text>
+              <Text style={styles.profileMeta}>{isDemo ? 'Singapore · English' : 'Supabase authenticated patient'}</Text>
             </View>
             <Pressable
               accessibilityLabel="View patient details"
@@ -198,6 +210,14 @@ export function ProfileScreen() {
             <Icon name={{ ios: 'arrow.up.right', android: 'north_east', web: 'north_east' }} color="#9DE1D1" size={18} />
           </Pressable>
 
+          <Pressable accessibilityRole="button" onPress={() => void signOut()} style={styles.signOutButton}>
+            <Icon name={{ ios: 'rectangle.portrait.and.arrow.right', android: 'logout', web: 'logout' }} color="#9B3E38" size={18} />
+            <View style={styles.signOutCopy}>
+              <Text style={styles.signOutTitle}>{isDemo ? 'Exit portfolio preview' : 'Sign out'}</Text>
+              <Text style={styles.signOutCaption}>{isDemo ? 'Return to the secure patient access screen' : 'End this authenticated session on this device'}</Text>
+            </View>
+          </Pressable>
+
           <Pressable accessibilityRole="button" onPress={() => setPrivacyVisible(true)} style={styles.privacyCard}>
             <View style={styles.privacyIcon}>
               <Icon name={{ ios: 'lock.shield.fill', android: 'shield_lock', web: 'shield_lock' }} size={23} />
@@ -227,10 +247,9 @@ export function ProfileScreen() {
         onClose={() => setDetailsVisible(false)}
         title="Patient details"
         visible={detailsVisible}>
-        <InfoLine label="Full name" value="Maya Tan" />
-        <InfoLine label="Date of birth" value="18 February 1999" />
-        <InfoLine label="Mobile" value="+65 •••• 4821" />
-        <InfoLine label="Email" value="maya.tan@example.com" />
+        <InfoLine label="Full name" value={displayName} />
+        <InfoLine label="Account" value={isDemo ? 'Portfolio demonstration' : 'Supabase authenticated'} />
+        <InfoLine label="Email" value={isDemo ? 'maya.tan@example.com' : user?.email ?? 'Not available'} />
         <Text style={styles.modalFootnote}>Editing will be enabled after secure authentication is connected.</Text>
       </InformationModal>
       <InformationModal
@@ -457,6 +476,10 @@ const styles = StyleSheet.create({
   operationsCaption: { marginTop: 5, color: '#C7E6E0', fontSize: 8, lineHeight: 12 },
   staffPill: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(157,225,209,0.16)' },
   staffPillText: { color: '#9DE1D1', fontSize: 6, fontWeight: '900', letterSpacing: 0.6 },
+  signOutButton: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 12, padding: 15, borderWidth: 1, borderColor: '#F0D8D5', borderRadius: 19, backgroundColor: '#FFF7F6' },
+  signOutCopy: { flex: 1 },
+  signOutTitle: { color: '#873C37', fontSize: 10, fontWeight: '800' },
+  signOutCaption: { marginTop: 3, color: '#98706D', fontSize: 7, lineHeight: 11 },
   privacyCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 24, padding: 16, borderRadius: 21, backgroundColor: colors.tealSoft },
   privacyIcon: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 15, backgroundColor: colors.card },
   privacyContent: { flex: 1 },
