@@ -37,6 +37,7 @@ export function ClinicsFlow() {
   const [bookingStage, setBookingStage] = useState<BookingStage>('details');
   const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
+  const [bookingError, setBookingError] = useState<string | null>(null);
   const [availableClinics, setAvailableClinics] = useState<Clinic[]>(clinics);
   const [directoryState, setDirectoryState] = useState<'loading' | 'live' | 'fallback'>('loading');
 
@@ -122,11 +123,17 @@ export function ClinicsFlow() {
       <BookingReview
         clinic={selectedClinic}
         draft={bookingDraft}
+        error={bookingError}
         onBack={() => setBookingStage('schedule')}
         onConfirm={async () => {
-          const appointment = await saveAppointment(selectedClinic, bookingDraft);
-          setConfirmedAppointment(appointment);
-          setBookingStage('success');
+          setBookingError(null);
+          try {
+            const appointment = await saveAppointment(selectedClinic, bookingDraft);
+            setConfirmedAppointment(appointment);
+            setBookingStage('success');
+          } catch {
+            setBookingError('Clinque could not securely save this appointment. Check your connection and try again.');
+          }
         }}
       />
     );
@@ -606,16 +613,27 @@ function BookingSchedule({
 function BookingReview({
   clinic,
   draft,
+  error,
   onBack,
   onConfirm,
 }: {
   clinic: Clinic;
   draft: BookingDraft;
+  error: string | null;
   onBack: () => void;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
 }) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function confirmBooking() {
+    if (submitting) return;
+    setSubmitting(true);
+    await onConfirm();
+    setSubmitting(false);
+  }
+
   return (
-    <BookingPage actionLabel="Confirm appointment" onAction={onConfirm} onBack={onBack} progress={2} title="Review booking">
+    <BookingPage actionLabel={submitting ? 'Saving securely…' : 'Confirm appointment'} onAction={() => void confirmBooking()} onBack={onBack} progress={2} title="Review booking">
       <View style={styles.reviewHero}>
         <View style={styles.reviewCalendarIcon}>
           <Icon name={{ ios: 'calendar.badge.checkmark', android: 'event_available', web: 'event_available' }} color={colors.teal} size={30} />
@@ -630,7 +648,7 @@ function BookingReview({
           icon={{ ios: 'cross.case.fill', android: 'medical_services', web: 'medical_services' }}
           label="CLINIC"
           value={clinic.name}
-          caption="10 Sinaran Drive, Singapore 307506"
+          caption={clinic.address}
         />
         <View style={styles.reviewDivider} />
         <ReviewRow
@@ -671,6 +689,12 @@ function BookingReview({
       <Text style={styles.consentText}>
         By confirming, you agree to share these appointment details with {clinic.name}.
       </Text>
+      {error && (
+        <View style={styles.bookingError}>
+          <Icon name={{ ios: 'exclamationmark.circle.fill', android: 'error', web: 'error' }} color="#A33A32" size={17} />
+          <Text style={styles.bookingErrorText}>{error}</Text>
+        </View>
+      )}
     </BookingPage>
   );
 }
@@ -1839,6 +1863,21 @@ const styles = StyleSheet.create({
     fontSize: 8,
     lineHeight: 13,
     textAlign: 'center',
+  },
+  bookingError: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    padding: 11,
+    borderRadius: 13,
+    backgroundColor: '#FCEAE8',
+  },
+  bookingErrorText: {
+    flex: 1,
+    color: '#8A342E',
+    fontSize: 8,
+    lineHeight: 13,
   },
   successScreen: {
     flex: 1,

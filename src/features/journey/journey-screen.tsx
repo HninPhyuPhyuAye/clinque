@@ -50,7 +50,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 export function JourneyScreen() {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
-  const { appointment, cancelAppointment, loading, startQueue, updateAppointment, visitHistory } = useAppointment();
+  const { appointment, cancelAppointment, loading, startQueue, syncError, updateAppointment, visitHistory } = useAppointment();
   const [activeTab, setActiveTab] = useState<JourneyTab>(tab === 'past' ? 'past' : 'current');
   const [qrVisible, setQrVisible] = useState(false);
   const [rescheduleVisible, setRescheduleVisible] = useState(false);
@@ -103,6 +103,7 @@ export function JourneyScreen() {
           </View>
 
           {activeTab === 'current' && loading && <JourneyLoading />}
+          {activeTab === 'current' && !loading && syncError && <JourneySyncError message={syncError} />}
           {activeTab === 'current' && !loading && appointment && (
             <CurrentJourney
               appointment={appointment}
@@ -117,7 +118,7 @@ export function JourneyScreen() {
               onReschedule={() => setRescheduleVisible(true)}
             />
           )}
-          {activeTab === 'current' && !loading && !appointment && (
+          {activeTab === 'current' && !loading && !appointment && !syncError && (
             <EmptyJourney onBook={() => router.push('/explore')} />
           )}
           {activeTab === 'past' && <PastJourney completedVisits={visitHistory} />}
@@ -263,6 +264,19 @@ function JourneyLoading() {
       <View style={styles.loadingPill} />
       <View style={styles.loadingLine} />
       <View style={[styles.loadingLine, styles.loadingLineShort]} />
+    </View>
+  );
+}
+
+function JourneySyncError({ message }: { message: string }) {
+  return (
+    <View style={styles.journeySyncError}>
+      <View style={styles.journeySyncErrorIcon}>
+        <Icon name={{ ios: 'icloud.slash.fill', android: 'cloud_off', web: 'cloud_off' }} color="#A33A32" size={24} />
+      </View>
+      <Text style={styles.journeySyncErrorTitle}>Appointment sync needs attention</Text>
+      <Text style={styles.journeySyncErrorMessage}>{message}</Text>
+      <Text style={styles.journeySyncErrorHint}>Refresh once after checking your connection. Clinque will never show an unsaved booking as confirmed.</Text>
     </View>
   );
 }
@@ -723,6 +737,11 @@ const styles = StyleSheet.create({
   loadingPill: { width: 82, height: 22, borderRadius: 11, backgroundColor: '#D2E1DE' },
   loadingLine: { width: '72%', height: 18, marginTop: 20, borderRadius: 9, backgroundColor: '#D2E1DE' },
   loadingLineShort: { width: '48%', height: 11, marginTop: 10 },
+  journeySyncError: { alignItems: 'center', marginTop: 18, paddingHorizontal: 24, paddingVertical: 32, borderWidth: 1, borderColor: '#F0C9C4', borderRadius: 26, backgroundColor: '#FFF7F6' },
+  journeySyncErrorIcon: { width: 58, height: 58, alignItems: 'center', justifyContent: 'center', borderRadius: 20, backgroundColor: '#FCEAE8' },
+  journeySyncErrorTitle: { marginTop: 15, color: '#6E2925', fontSize: 16, fontWeight: '800', textAlign: 'center' },
+  journeySyncErrorMessage: { maxWidth: 440, marginTop: 8, color: '#8A342E', fontSize: 9, lineHeight: 15, textAlign: 'center' },
+  journeySyncErrorHint: { maxWidth: 420, marginTop: 10, color: colors.muted, fontSize: 8, lineHeight: 13, textAlign: 'center' },
   emptyJourney: { alignItems: 'center', marginTop: 18, paddingHorizontal: 24, paddingVertical: 38, borderWidth: 1, borderColor: colors.line, borderRadius: 26, backgroundColor: colors.card },
   emptyJourneyIcon: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderRadius: 22, backgroundColor: colors.tealSoft },
   emptyJourneyTitle: { marginTop: 18, color: colors.ink, fontSize: 17, fontWeight: '800', textAlign: 'center' },

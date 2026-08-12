@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 
+import { useAuth } from '@/features/auth/auth-context';
 import type { BookingDraft, Clinic } from '@/features/clinics/clinic-data';
+import { supabase } from '@/lib/supabase';
 
 const appointmentStorageKey = '@clinque/current-appointment';
 const visitHistoryStorageKey = '@clinque/visit-history';
@@ -57,6 +59,7 @@ type AppointmentContextValue = {
   completeConsultation: () => Promise<CompletedVisit | null>;
   createDemoQueue: () => Promise<Appointment>;
   loading: boolean;
+  syncError: string | null;
   saveAppointment: (clinic: Clinic, draft: BookingDraft) => Promise<Appointment>;
   startQueue: () => Promise<Appointment | null>;
   toggleCareTask: (visitId: string, taskId: CareTask['id']) => Promise<void>;
@@ -67,29 +70,66 @@ type AppointmentContextValue = {
 const AppointmentContext = createContext<AppointmentContextValue | null>(null);
 
 export function AppointmentProvider({ children }: { children: ReactNode }) {
+  const { isDemo, user } = useAuth();
   const [appointment, setAppointment] = useState<Appointment | null>(null);
   const [visitHistory, setVisitHistory] = useState<CompletedVisit[]>([]);
   const [loading, setLoading] = useState(true);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
     async function loadAppointment() {
+      setLoading(true);
+      setSyncError(null);
       try {
-        const [savedAppointment, savedVisitHistory] = await Promise.all([
-          AsyncStorage.getItem(appointmentStorageKey),
-          AsyncStorage.getItem(visitHistoryStorageKey),
-        ]);
-        if (savedAppointment && active) {
-          setAppointment(JSON.parse(savedAppointment) as Appointment);
-        }
+        const savedVisitHistory = await AsyncStorage.getItem(visitHistoryStorageKey);
         if (savedVisitHistory && active) {
           const savedVisits = JSON.parse(savedVisitHistory) as Array<CompletedVisit & { careTasks?: CareTask[] }>;
           setVisitHistory(savedVisits.map((visit) => ({ ...visit, careTasks: visit.careTasks ?? createCareTasks() })));
         }
-      } catch {
+
+        if (user && !isDemo) {
+          const { data, error } = await supabase
+            .from('appointments')
+            .select('id, confirmation_code, clinic_id, doctor_name, reason, scheduled_at, status, created_at')
+            .eq('patient_id', user.id)
+            .in('status', ['booked', 'checked_in', 'waiting', 'called'])
+            .order('scheduled_at', { ascending: true })
+            .limit(1)
+            .maybeSingle();
+
+          if (error) throw error;
+          if (!data) {
+            if (active) setAppointment(null);
+            return;
+          }
+
+          const { data: clinic, error: clinicError } = await supabase
+            .from('clinics')
+            .select('name, specialty')
+            .eq('id', data.clinic_id)
+            .single();
+
+          if (clinicError) throw clinicError;
+          if (active) setAppointment(mapDatabaseAppointment(data, clinic));
+          return;
+        }
+
+        const savedAppointment = await AsyncStorage.getItem(appointmentStorageKey);
+        if (savedAppointment && active) {
+          setAppointment(JSON.parse(savedAppointment) as Appointment);
+        }
+      } catch (error) {
         // A corrupt local value should not prevent the rest of Clinque from loading.
-        if (active) setAppointment(null);
+        if (active) {
+          setAppointment(null);
+          setSyncError(
+            error instanceof Error
+              ? `Clinque could not load your secure appointment: ${error.message}`
+              : 'Clinque could not load your secure appointment. Check your connection and try again.',
+          );
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -100,7 +140,7 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [isDemo, user]);
 
   const value = useMemo<AppointmentContextValue>(
     () => ({
@@ -124,6 +164,18 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         return updatedAppointment;
       },
       cancelAppointment: async () => {
+        if (user && !isDemo && appointment) {
+          const { error } = await supabase
+            .from('appointments')
+            .update({ status: 'cancelled' })
+            .eq('id', appointment.id)
+            .eq('patient_id', user.id);
+
+          if (error) throw error;
+          setAppointment(null);
+          return;
+        }
+
         setAppointment(null);
         try {
           await AsyncStorage.removeItem(appointmentStorageKey);
@@ -190,6 +242,33 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
       },
       loading,
       saveAppointment: async (clinic, draft) => {
+        if (user && !isDemo) {
+          const confirmationCode = createConfirmationCode();
+          const { data, error } = await supabase
+            .from('appointments')
+            .insert({
+              patient_id: user.id,
+              clinic_id: clinic.id,
+              confirmation_code: confirmationCode,
+              doctor_name: 'Dr. Sarah Lim',
+              reason: draft.reason,
+              scheduled_at: toScheduledAt(draft.date, draft.time),
+              status: 'booked',
+            })
+            .select('id, confirmation_code, clinic_id, doctor_name, reason, scheduled_at, created_at')
+            .single();
+
+          if (error) throw error;
+
+          const remoteAppointment = createAppointment(clinic, draft, {
+            id: data.id,
+            confirmationCode: data.confirmation_code,
+            bookedAt: data.created_at,
+          });
+          setAppointment(remoteAppointment);
+          return remoteAppointment;
+        }
+
         const nextAppointment = createAppointment(clinic, draft);
 
         setAppointment(nextAppointment);
@@ -201,6 +280,7 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
 
         return nextAppointment;
       },
+      syncError,
       startQueue: async () => {
         if (!appointment) return null;
         if (appointment.queue) return appointment;
@@ -243,6 +323,22 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         if (!appointment) return null;
 
         const updatedAppointment = { ...appointment, ...draft, queue: undefined };
+
+        if (user && !isDemo) {
+          const { error } = await supabase
+            .from('appointments')
+            .update({
+              scheduled_at: toScheduledAt(draft.date, draft.time),
+              status: 'booked',
+            })
+            .eq('id', appointment.id)
+            .eq('patient_id', user.id);
+
+          if (error) throw error;
+          setAppointment(updatedAppointment);
+          return updatedAppointment;
+        }
+
         setAppointment(updatedAppointment);
 
         try {
@@ -255,7 +351,7 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
       },
       visitHistory,
     }),
-    [appointment, loading, visitHistory],
+    [appointment, isDemo, loading, syncError, user, visitHistory],
   );
 
   return <AppointmentContext.Provider value={value}>{children}</AppointmentContext.Provider>;
@@ -283,12 +379,16 @@ export function useAppointment() {
   return context;
 }
 
-function createAppointment(clinic: Clinic, draft: BookingDraft): Appointment {
+function createAppointment(
+  clinic: Clinic,
+  draft: BookingDraft,
+  remote?: Pick<Appointment, 'bookedAt' | 'confirmationCode' | 'id'>,
+): Appointment {
   const confirmationSuffix = `${draft.date.match(/\d+/)?.[0] ?? '00'}${toTwentyFourHour(draft.time).replace(':', '')}`;
 
   return {
-    id: `${clinic.id}-${Date.now()}`,
-    confirmationCode: `CQ-${confirmationSuffix}`,
+    id: remote?.id ?? `${clinic.id}-${Date.now()}`,
+    confirmationCode: remote?.confirmationCode ?? `CQ-${confirmationSuffix}`,
     clinicId: clinic.id,
     clinicName: clinic.name,
     doctorName: 'Dr. Sarah Lim',
@@ -297,7 +397,7 @@ function createAppointment(clinic: Clinic, draft: BookingDraft): Appointment {
     time: draft.time,
     reason: draft.reason,
     waitMinutes: clinic.waitMinutes,
-    bookedAt: new Date().toISOString(),
+    bookedAt: remote?.bookedAt ?? new Date().toISOString(),
   };
 }
 
@@ -349,4 +449,61 @@ function toTwentyFourHour(time: string) {
   if (period === 'AM' && hour === 12) hour = 0;
 
   return `${hour.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+}
+
+function createConfirmationCode() {
+  return `CQ-${Date.now().toString(36).slice(-5).toUpperCase()}${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
+}
+
+function toScheduledAt(date: string, time: string) {
+  const parsedDate = new Date(date);
+  const singaporeDate = [
+    parsedDate.getFullYear(),
+    String(parsedDate.getMonth() + 1).padStart(2, '0'),
+    String(parsedDate.getDate()).padStart(2, '0'),
+  ].join('-');
+
+  return new Date(`${singaporeDate}T${toTwentyFourHour(time)}:00+08:00`).toISOString();
+}
+
+type DatabaseAppointment = {
+  id: string;
+  confirmation_code: string;
+  clinic_id: string;
+  doctor_name: string;
+  reason: string;
+  scheduled_at: string;
+  created_at: string;
+};
+
+function mapDatabaseAppointment(
+  row: DatabaseAppointment,
+  clinic: { name: string; specialty: string },
+): Appointment {
+  const scheduledAt = new Date(row.scheduled_at);
+
+  return {
+    id: row.id,
+    confirmationCode: row.confirmation_code,
+    clinicId: row.clinic_id,
+    clinicName: clinic?.name ?? 'Clinque clinic',
+    doctorName: row.doctor_name,
+    specialty: clinic?.specialty ?? 'Primary care',
+    date: new Intl.DateTimeFormat('en-SG', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'Asia/Singapore',
+    }).format(scheduledAt),
+    time: new Intl.DateTimeFormat('en-SG', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'Asia/Singapore',
+    }).format(scheduledAt),
+    reason: row.reason,
+    waitMinutes: 10,
+    bookedAt: row.created_at,
+  };
 }
