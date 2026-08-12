@@ -6,6 +6,7 @@ import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-n
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAppointment } from '@/features/appointments/appointment-context';
+import { useAuth } from '@/features/auth/auth-context';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
 import { type ClinqueNotification, useNotifications } from '@/features/notifications/notification-context';
 
@@ -17,6 +18,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 
 export function LiveQueueScreen() {
   const router = useRouter();
+  const { isDemo } = useAuth();
   const { advanceQueue, appointment, completeConsultation, loading } = useAppointment();
   const { addQueueAlert } = useNotifications();
   const [visibleAlert, setVisibleAlert] = useState<ClinqueNotification | null>(null);
@@ -164,27 +166,37 @@ export function LiveQueueScreen() {
           <View style={styles.demoCard}>
             <View style={styles.demoHeader}>
               <View>
-                <Text style={styles.demoLabel}>PORTFOLIO DEMO</Text>
-                <Text style={styles.demoTitle}>Simulate a clinic update</Text>
+                <Text style={styles.demoLabel}>{isDemo ? 'PORTFOLIO DEMO' : 'SECURE REALTIME'}</Text>
+                <Text style={styles.demoTitle}>{isDemo ? 'Simulate a clinic update' : 'Listening for clinic updates'}</Text>
               </View>
-              <Icon name={{ ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }} color={colors.warm} size={19} />
+              <Icon
+                name={isDemo
+                  ? { ios: 'sparkles', android: 'auto_awesome', web: 'auto_awesome' }
+                  : { ios: 'antenna.radiowaves.left.and.right', android: 'sensors', web: 'sensors' }}
+                color={isDemo ? colors.warm : colors.teal}
+                size={19}
+              />
             </View>
-            <Text style={styles.demoCaption}>Move the queue forward to demonstrate live status changes without a clinic backend.</Text>
-            <Pressable
-              accessibilityRole="button"
-              disabled={called}
-              onPress={async () => {
-                const updatedAppointment = await advanceQueue();
-                if (updatedAppointment) {
-                  const alert = await addQueueAlert(updatedAppointment);
-                  if (alert) setVisibleAlert(alert);
-                }
-              }}
-              style={[styles.demoButton, called && styles.demoButtonDisabled]}>
-              <Text style={styles.demoButtonText}>{called ? 'Patient has been called' : 'Advance queue by one'}</Text>
-              {!called && <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={17} />}
-            </Pressable>
-            {called && (
+            <Text style={styles.demoCaption}>
+              {isDemo
+                ? 'Move the queue forward to demonstrate live status changes without a clinic backend.'
+                : 'Your position and wait estimate update automatically. Only authorized clinic staff can advance this queue.'}
+            </Text>
+            {isDemo && <Pressable
+                accessibilityRole="button"
+                disabled={called}
+                onPress={async () => {
+                  const updatedAppointment = await advanceQueue();
+                  if (updatedAppointment) {
+                    const alert = await addQueueAlert(updatedAppointment);
+                    if (alert) setVisibleAlert(alert);
+                  }
+                }}
+                style={[styles.demoButton, called && styles.demoButtonDisabled]}>
+                <Text style={styles.demoButtonText}>{called ? 'Patient has been called' : 'Advance queue by one'}</Text>
+                {!called && <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color="#FFFFFF" size={17} />}
+              </Pressable>}
+            {isDemo && called && (
               <Pressable
                 accessibilityRole="button"
                 onPress={async () => {

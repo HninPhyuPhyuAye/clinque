@@ -112,7 +112,15 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
             .single();
 
           if (clinicError) throw clinicError;
-          if (active) setAppointment(mapDatabaseAppointment(data, clinic));
+          const { data: queue, error: queueError } = await supabase
+            .from('queue_entries')
+            .select('status, position, estimated_minutes, checked_in_at, updated_at')
+            .eq('appointment_id', data.id)
+            .in('status', ['waiting', 'called'])
+            .maybeSingle();
+
+          if (queueError) throw queueError;
+          if (active) setAppointment(mapDatabaseAppointment(data, clinic, queue));
           return;
         }
 
@@ -142,11 +150,41 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
     };
   }, [isDemo, user]);
 
+  useEffect(() => {
+    if (!user || isDemo || !appointment) return;
+
+    const channel = supabase
+      .channel(`patient-queue-${appointment.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'queue_entries',
+          filter: `patient_id=eq.${user.id}`,
+        },
+        (payload) => {
+          const row = payload.new as Partial<DatabaseQueueEntry>;
+          if (!isDatabaseQueueEntry(row) || row.appointment_id !== appointment.id) return;
+
+          setAppointment((current) => current
+            ? { ...current, queue: mapDatabaseQueue(row) }
+            : current);
+        },
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [appointment?.id, isDemo, user]);
+
   const value = useMemo<AppointmentContextValue>(
     () => ({
       appointment,
       advanceQueue: async () => {
         if (!appointment?.queue) return appointment;
+        if (user && !isDemo) return appointment;
 
         const nextPosition = Math.max(appointment.queue.position - 1, 0);
         const updatedAppointment: Appointment = {
@@ -286,6 +324,36 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         if (appointment.queue) return appointment;
 
         const now = new Date().toISOString();
+
+        if (user && !isDemo) {
+          const { data, error } = await supabase
+            .from('queue_entries')
+            .insert({
+              appointment_id: appointment.id,
+              clinic_id: appointment.clinicId,
+              patient_id: user.id,
+              position: 4,
+              estimated_minutes: 12,
+              status: 'waiting',
+            })
+            .select('appointment_id, status, position, estimated_minutes, checked_in_at, updated_at')
+            .single();
+
+          if (error) throw error;
+
+          const { error: appointmentError } = await supabase
+            .from('appointments')
+            .update({ status: 'checked_in' })
+            .eq('id', appointment.id)
+            .eq('patient_id', user.id);
+
+          if (appointmentError) throw appointmentError;
+
+          const checkedInAppointment = { ...appointment, queue: mapDatabaseQueue(data) };
+          setAppointment(checkedInAppointment);
+          return checkedInAppointment;
+        }
+
         const updatedAppointment: Appointment = {
           ...appointment,
           queue: {
@@ -476,9 +544,19 @@ type DatabaseAppointment = {
   created_at: string;
 };
 
+type DatabaseQueueEntry = {
+  appointment_id: string;
+  status: 'waiting' | 'called' | 'completed' | 'cancelled';
+  position: number;
+  estimated_minutes: number;
+  checked_in_at: string;
+  updated_at: string;
+};
+
 function mapDatabaseAppointment(
   row: DatabaseAppointment,
   clinic: { name: string; specialty: string },
+  queue: Omit<DatabaseQueueEntry, 'appointment_id'> | null,
 ): Appointment {
   const scheduledAt = new Date(row.scheduled_at);
 
@@ -505,5 +583,25 @@ function mapDatabaseAppointment(
     reason: row.reason,
     waitMinutes: 10,
     bookedAt: row.created_at,
+    queue: queue ? mapDatabaseQueue({ ...queue, appointment_id: row.id }) : undefined,
   };
+}
+
+function mapDatabaseQueue(row: DatabaseQueueEntry): QueueState {
+  return {
+    status: row.status === 'called' ? 'called' : 'waiting',
+    position: row.position,
+    estimatedMinutes: row.estimated_minutes,
+    checkedInAt: row.checked_in_at,
+    lastUpdatedAt: row.updated_at,
+  };
+}
+
+function isDatabaseQueueEntry(row: Partial<DatabaseQueueEntry>): row is DatabaseQueueEntry {
+  return typeof row.appointment_id === 'string'
+    && (row.status === 'waiting' || row.status === 'called' || row.status === 'completed' || row.status === 'cancelled')
+    && typeof row.position === 'number'
+    && typeof row.estimated_minutes === 'number'
+    && typeof row.checked_in_at === 'string'
+    && typeof row.updated_at === 'string';
 }
