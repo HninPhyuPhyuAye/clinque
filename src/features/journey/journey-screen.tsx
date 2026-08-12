@@ -2,7 +2,7 @@ import { SymbolView } from 'expo-symbols';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
 import { useEffect, useState } from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
@@ -50,7 +50,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 export function JourneyScreen() {
   const router = useRouter();
   const { tab } = useLocalSearchParams<{ tab?: string }>();
-  const { appointment, cancelAppointment, loading, updateAppointment } = useAppointment();
+  const { appointment, cancelAppointment, loading, startQueue, updateAppointment } = useAppointment();
   const [activeTab, setActiveTab] = useState<JourneyTab>(tab === 'past' ? 'past' : 'current');
   const [qrVisible, setQrVisible] = useState(false);
   const [rescheduleVisible, setRescheduleVisible] = useState(false);
@@ -59,6 +59,15 @@ export function JourneyScreen() {
   useEffect(() => {
     setActiveTab(tab === 'past' ? 'past' : 'current');
   }, [tab]);
+
+  function openQueue() {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.assign('/queue');
+      return;
+    }
+
+    router.push('/queue');
+  }
 
   return (
     <View style={styles.screen}>
@@ -98,7 +107,13 @@ export function JourneyScreen() {
             <CurrentJourney
               appointment={appointment}
               onCancel={() => setCancelVisible(true)}
-              onCheckIn={() => setQrVisible(true)}
+              onCheckIn={() => {
+                if (appointment.queue) {
+                  openQueue();
+                } else {
+                  setQrVisible(true);
+                }
+              }}
               onReschedule={() => setRescheduleVisible(true)}
             />
           )}
@@ -109,7 +124,16 @@ export function JourneyScreen() {
         </ScrollView>
       </SafeAreaView>
 
-      <CheckInModal appointment={appointment} onClose={() => setQrVisible(false)} visible={qrVisible} />
+      <CheckInModal
+        appointment={appointment}
+        onClose={() => setQrVisible(false)}
+        onConfirm={async () => {
+          await startQueue();
+          setQrVisible(false);
+          openQueue();
+        }}
+        visible={qrVisible}
+      />
       <RescheduleModal
         appointment={appointment}
         onClose={() => setRescheduleVisible(false)}
@@ -168,11 +192,17 @@ function CurrentJourney({
         <View style={styles.queuePanel}>
           <View>
             <Text style={styles.queueLabel}>LIVE QUEUE FORECAST</Text>
-            <Text style={styles.queueValue}>{appointment.waitMinutes}–{appointment.waitMinutes + 6} min wait</Text>
+            <Text style={styles.queueValue}>
+              {appointment.queue
+                ? appointment.queue.status === 'called'
+                  ? 'Doctor is ready'
+                  : `Queue #${appointment.queue.position} · ${appointment.queue.estimatedMinutes} min`
+                : `${appointment.waitMinutes}–${appointment.waitMinutes + 6} min wait`}
+            </Text>
           </View>
           <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.checkInButton}>
             <Icon name={{ ios: 'qrcode.viewfinder', android: 'qr_code_scanner', web: 'qr_code_scanner' }} color={colors.tealDark} size={16} />
-            <Text style={styles.checkInText}>Check in</Text>
+            <Text style={styles.checkInText}>{appointment.queue ? 'View queue' : 'Check in'}</Text>
           </Pressable>
         </View>
       </View>
@@ -504,13 +534,23 @@ function CancelAppointmentModal({
 function CheckInModal({
   appointment,
   onClose,
+  onConfirm,
   visible,
 }: {
   appointment: Appointment | null;
   onClose: () => void;
+  onConfirm: () => Promise<void>;
   visible: boolean;
 }) {
+  const [confirming, setConfirming] = useState(false);
+
   if (!appointment) return null;
+
+  async function confirmArrival() {
+    setConfirming(true);
+    await onConfirm();
+    setConfirming(false);
+  }
 
   return (
     <Modal animationType="fade" onRequestClose={onClose} transparent visible={visible}>
@@ -539,8 +579,15 @@ function CheckInModal({
             <View style={styles.modalStatusDot} />
             <Text style={styles.modalStatusText}>Activates at {getCheckInTime(appointment.time)}</Text>
           </View>
-          <Pressable accessibilityRole="button" onPress={onClose} style={styles.modalDone}>
-            <Text style={styles.modalDoneText}>Done</Text>
+          <Pressable
+            accessibilityRole="button"
+            disabled={confirming}
+            onPress={() => void confirmArrival()}
+            style={[styles.modalDone, confirming && styles.modalButtonDisabled]}>
+            <Text style={styles.modalDoneText}>{confirming ? 'Checking in…' : 'Confirm arrival'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" disabled={confirming} onPress={onClose} style={styles.qrNotYetButton}>
+            <Text style={styles.qrNotYetText}>Not at the clinic yet</Text>
           </Pressable>
         </View>
       </View>
@@ -713,4 +760,6 @@ const styles = StyleSheet.create({
   modalStatusText: { color: colors.warm, fontSize: 8, fontWeight: '800' },
   modalDone: { width: '100%', alignItems: 'center', justifyContent: 'center', minHeight: 48, marginTop: 18, borderRadius: 16, backgroundColor: colors.teal },
   modalDoneText: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
+  qrNotYetButton: { width: '100%', alignItems: 'center', justifyContent: 'center', minHeight: 42, marginTop: 7 },
+  qrNotYetText: { color: colors.muted, fontSize: 9, fontWeight: '700' },
 });

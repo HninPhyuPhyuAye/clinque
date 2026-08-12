@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
 import { useRouter } from 'expo-router';
 import type { ComponentProps } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
@@ -56,6 +56,15 @@ export default function HomeScreen() {
   const router = useRouter();
   const { appointment, loading } = useAppointment();
 
+  function openQueue() {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.location.assign('/queue');
+      return;
+    }
+
+    router.push('/queue');
+  }
+
   function openQuickAction(label: string) {
     if (label === 'Book') {
       router.push('/explore');
@@ -94,7 +103,10 @@ export default function HomeScreen() {
 
           {loading && <AppointmentLoadingCard />}
           {!loading && appointment && (
-            <HomeAppointmentCard appointment={appointment} onCheckIn={() => router.push('/journey')} />
+            <HomeAppointmentCard
+              appointment={appointment}
+              onAction={appointment.queue ? openQueue : () => router.push('/journey')}
+            />
           )}
           {!loading && !appointment && <EmptyAppointmentCard onBook={() => router.push('/explore')} />}
 
@@ -165,7 +177,7 @@ export default function HomeScreen() {
   );
 }
 
-function HomeAppointmentCard({ appointment, onCheckIn }: { appointment: Appointment; onCheckIn: () => void }) {
+function HomeAppointmentCard({ appointment, onAction }: { appointment: Appointment; onAction: () => void }) {
   return (
     <View style={styles.appointmentCard}>
       <View style={styles.appointmentGlow} />
@@ -202,11 +214,17 @@ function HomeAppointmentCard({ appointment, onCheckIn }: { appointment: Appointm
 
       <View style={styles.queuePanel}>
         <View>
-          <Text style={styles.queueLabel}>ESTIMATED WAIT</Text>
-          <Text style={styles.queueValue}>{appointment.waitMinutes}–{appointment.waitMinutes + 6} minutes</Text>
+          <Text style={styles.queueLabel}>{appointment.queue ? 'LIVE QUEUE' : 'ESTIMATED WAIT'}</Text>
+          <Text style={styles.queueValue}>
+            {appointment.queue
+              ? appointment.queue.status === 'called'
+                ? 'Doctor is ready'
+                : `Position #${appointment.queue.position} · ${appointment.queue.estimatedMinutes} min`
+              : `${appointment.waitMinutes}–${appointment.waitMinutes + 6} minutes`}
+          </Text>
         </View>
-        <Pressable accessibilityRole="button" onPress={onCheckIn} style={styles.checkInButton}>
-          <Text style={styles.checkInText}>Check in</Text>
+        <Pressable accessibilityRole="button" onPress={onAction} style={styles.checkInButton}>
+          <Text style={styles.checkInText}>{appointment.queue ? 'View queue' : 'Check in'}</Text>
           <Icon
             name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }}
             color={colors.tealDark}

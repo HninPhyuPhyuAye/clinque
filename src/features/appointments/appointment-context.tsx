@@ -17,13 +17,24 @@ export type Appointment = {
   reason: string;
   waitMinutes: number;
   bookedAt: string;
+  queue?: QueueState;
+};
+
+export type QueueState = {
+  status: 'waiting' | 'called';
+  position: number;
+  estimatedMinutes: number;
+  checkedInAt: string;
+  lastUpdatedAt: string;
 };
 
 type AppointmentContextValue = {
   appointment: Appointment | null;
+  advanceQueue: () => Promise<Appointment | null>;
   cancelAppointment: () => Promise<void>;
   loading: boolean;
   saveAppointment: (clinic: Clinic, draft: BookingDraft) => Promise<Appointment>;
+  startQueue: () => Promise<Appointment | null>;
   updateAppointment: (draft: Pick<BookingDraft, 'date' | 'time'>) => Promise<Appointment | null>;
 };
 
@@ -60,6 +71,24 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
   const value = useMemo<AppointmentContextValue>(
     () => ({
       appointment,
+      advanceQueue: async () => {
+        if (!appointment?.queue) return appointment;
+
+        const nextPosition = Math.max(appointment.queue.position - 1, 0);
+        const updatedAppointment: Appointment = {
+          ...appointment,
+          queue: {
+            ...appointment.queue,
+            status: nextPosition === 0 ? 'called' : 'waiting',
+            position: nextPosition,
+            estimatedMinutes: nextPosition === 0 ? 0 : Math.max(nextPosition * 3, 3),
+            lastUpdatedAt: new Date().toISOString(),
+          },
+        };
+
+        await persistAppointment(updatedAppointment, setAppointment);
+        return updatedAppointment;
+      },
       cancelAppointment: async () => {
         setAppointment(null);
         try {
@@ -81,10 +110,29 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
 
         return nextAppointment;
       },
+      startQueue: async () => {
+        if (!appointment) return null;
+        if (appointment.queue) return appointment;
+
+        const now = new Date().toISOString();
+        const updatedAppointment: Appointment = {
+          ...appointment,
+          queue: {
+            status: 'waiting',
+            position: 4,
+            estimatedMinutes: 12,
+            checkedInAt: now,
+            lastUpdatedAt: now,
+          },
+        };
+
+        await persistAppointment(updatedAppointment, setAppointment);
+        return updatedAppointment;
+      },
       updateAppointment: async (draft) => {
         if (!appointment) return null;
 
-        const updatedAppointment = { ...appointment, ...draft };
+        const updatedAppointment = { ...appointment, ...draft, queue: undefined };
         setAppointment(updatedAppointment);
 
         try {
@@ -100,6 +148,18 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
   );
 
   return <AppointmentContext.Provider value={value}>{children}</AppointmentContext.Provider>;
+}
+
+async function persistAppointment(
+  appointment: Appointment,
+  setAppointment: (appointment: Appointment) => void,
+) {
+  setAppointment(appointment);
+  try {
+    await AsyncStorage.setItem(appointmentStorageKey, JSON.stringify(appointment));
+  } catch {
+    // Keep the latest state for the current session if device storage is unavailable.
+  }
 }
 
 export function useAppointment() {

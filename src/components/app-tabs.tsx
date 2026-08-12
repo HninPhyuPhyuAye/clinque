@@ -1,11 +1,18 @@
 import { NativeTabs } from 'expo-router/unstable-native-tabs';
+import { usePathname } from 'expo-router';
 import { useColorScheme } from 'react-native';
 
 import { Colors } from '@/constants/theme';
+import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
 
 export default function AppTabs() {
+  const pathname = usePathname();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'unspecified' ? 'light' : scheme];
+
+  if (pathname === '/queue') {
+    return <LiveQueueScreen />;
+  }
 
   return (
     <NativeTabs
@@ -43,6 +50,8 @@ export default function AppTabs() {
           md={{ default: 'account_circle', selected: 'account_circle' }}
         />
       </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger hidden name="queue" />
     </NativeTabs>
   );
 }

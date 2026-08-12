@@ -6,11 +6,22 @@ import {
   type TabListProps,
   type TabTriggerSlotProps,
 } from 'expo-router/ui';
+import { usePathname } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
+import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
+
 export default function AppTabs() {
+  const pathname = usePathname();
+
+  // The queue is a focused detail screen, not a tab destination. Rendering it
+  // outside the custom tab slot also makes direct browser refreshes reliable.
+  if (pathname === '/queue') {
+    return <LiveQueueScreen />;
+  }
+
   return (
     <Tabs>
       <TabSlot style={styles.slot} />
@@ -41,6 +52,7 @@ export default function AppTabs() {
               icon={{ ios: 'person.crop.circle', android: 'account_circle', web: 'account_circle' }}
             />
           </TabTrigger>
+          <TabTrigger name="queue" href="/queue" style={styles.hiddenTab} />
         </ClinqueTabBar>
       </TabList>
     </Tabs>
@@ -139,5 +151,8 @@ const styles = StyleSheet.create({
   },
   tabLabelFocused: {
     color: '#0E746A',
+  },
+  hiddenTab: {
+    display: 'none',
   },
 });
