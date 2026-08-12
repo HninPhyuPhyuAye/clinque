@@ -32,6 +32,13 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Clinque accesses your selected photo to set your private patient profile picture.",
+          "microphonePermission": false
+        }
       ]
     ],
     "experiments": {

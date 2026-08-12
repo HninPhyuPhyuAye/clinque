@@ -1,4 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decode } from 'base64-arraybuffer';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import { SymbolView } from 'expo-symbols';
 import type { ComponentProps, ReactNode } from 'react';
@@ -21,6 +24,7 @@ type ProfilePreferences = {
 };
 
 type PatientIdentity = {
+  avatarPath: string;
   fullName: string;
   phone: string;
 };
@@ -44,7 +48,8 @@ export function ProfileScreen() {
   const [clinicPickerVisible, setClinicPickerVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
   const [detailsVisible, setDetailsVisible] = useState(false);
-  const [identity, setIdentity] = useState<PatientIdentity>({ fullName: '', phone: '' });
+  const [identity, setIdentity] = useState<PatientIdentity>({ avatarPath: '', fullName: '', phone: '' });
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [identityLoading, setIdentityLoading] = useState(Boolean(user && !isDemo));
   const [identityError, setIdentityError] = useState<string | null>(null);
 
@@ -85,7 +90,8 @@ export function ProfileScreen() {
 
     async function loadIdentity() {
       if (!user || isDemo) {
-        setIdentity({ fullName: 'Maya Tan', phone: '+65 8123 4567' });
+        setIdentity({ avatarPath: '', fullName: 'Maya Tan', phone: '+65 8123 4567' });
+        setAvatarUrl(null);
         setIdentityLoading(false);
         return;
       }
@@ -94,7 +100,7 @@ export function ProfileScreen() {
       setIdentityError(null);
       const { data, error } = await supabase
         .from('profiles')
-        .select('full_name, phone')
+        .select('avatar_path, full_name, phone')
         .eq('id', user.id)
         .single();
 
@@ -103,7 +109,27 @@ export function ProfileScreen() {
       if (error) {
         setIdentityError(`Clinque could not load your secure profile: ${error.message}`);
       } else {
-        setIdentity({ fullName: data.full_name, phone: data.phone ?? '' });
+        const nextIdentity = {
+          avatarPath: data.avatar_path ?? '',
+          fullName: data.full_name,
+          phone: data.phone ?? '',
+        };
+        setIdentity(nextIdentity);
+
+        if (nextIdentity.avatarPath) {
+          const { data: signedAvatar, error: avatarError } = await supabase.storage
+            .from('avatars')
+            .createSignedUrl(nextIdentity.avatarPath, 60 * 60);
+
+          if (!active) return;
+          if (avatarError) {
+            setIdentityError(`Your profile loaded, but Clinque could not display its private photo: ${avatarError.message}`);
+          } else {
+            setAvatarUrl(signedAvatar.signedUrl);
+          }
+        } else {
+          setAvatarUrl(null);
+        }
       }
       setIdentityLoading(false);
     }
@@ -114,7 +140,7 @@ export function ProfileScreen() {
     };
   }, [isDemo, user]);
 
-  async function saveIdentity(nextIdentity: PatientIdentity) {
+  async function saveIdentity(nextIdentity: Pick<PatientIdentity, 'fullName' | 'phone'>) {
     if (!user || isDemo) return 'Demo identity is read-only.';
 
     const fullName = nextIdentity.fullName.trim();
@@ -127,8 +153,54 @@ export function ProfileScreen() {
       .eq('id', user.id);
 
     if (error) return error.message;
-    setIdentity({ fullName, phone });
+    setIdentity((current) => ({ ...current, fullName, phone }));
     setIdentityError(null);
+    return null;
+  }
+
+  async function uploadAvatar() {
+    if (!user || isDemo) return 'Demo profile pictures are read-only.';
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (result.canceled) return null;
+    const asset = result.assets[0];
+    if (!asset?.base64) return 'Clinque could not read that image. Please choose another photo.';
+    if (asset.fileSize && asset.fileSize > 3 * 1024 * 1024) return 'Choose a profile picture smaller than 3 MB.';
+
+    const contentType = asset.mimeType && ['image/jpeg', 'image/png', 'image/webp'].includes(asset.mimeType)
+      ? asset.mimeType
+      : 'image/jpeg';
+    const avatarPath = `${user.id}/avatar`;
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(avatarPath, decode(asset.base64), {
+        cacheControl: '3600',
+        contentType,
+        upsert: true,
+      });
+
+    if (uploadError) return uploadError.message;
+
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({ avatar_path: avatarPath })
+      .eq('id', user.id);
+    if (profileError) return profileError.message;
+
+    const { data: signedAvatar, error: signedUrlError } = await supabase.storage
+      .from('avatars')
+      .createSignedUrl(avatarPath, 60 * 60);
+    if (signedUrlError) return signedUrlError.message;
+
+    setIdentity((current) => ({ ...current, avatarPath }));
+    setAvatarUrl(`${signedAvatar.signedUrl}&v=${Date.now()}`);
     return null;
   }
 
@@ -165,7 +237,11 @@ export function ProfileScreen() {
 
           <View style={styles.profileHero}>
             <View style={styles.profileGlow} />
-            <View style={styles.avatar}><Text style={styles.avatarText}>{initials || 'C'}</Text></View>
+            <View style={styles.avatar}>
+              {avatarUrl
+                ? <Image contentFit="cover" source={{ uri: avatarUrl }} style={styles.avatarImage} />
+                : <Text style={styles.avatarText}>{initials || 'C'}</Text>}
+            </View>
             <View style={styles.profileIdentity}>
               <View style={styles.nameRow}>
                 <Text style={styles.profileName}>{displayName}</Text>
@@ -306,10 +382,12 @@ export function ProfileScreen() {
         visible={clinicPickerVisible}
       />
       <PatientDetailsModal
+        avatarUrl={avatarUrl}
         email={isDemo ? 'maya.tan@example.com' : user?.email ?? 'Not available'}
         error={identityError}
         identity={identity}
         isDemo={isDemo}
+        onChooseAvatar={uploadAvatar}
         onClose={() => setDetailsVisible(false)}
         onSave={saveIdentity}
         visible={detailsVisible}
@@ -448,25 +526,30 @@ function ClinicPickerModal({
 }
 
 function PatientDetailsModal({
+  avatarUrl,
   email,
   error,
   identity,
   isDemo,
+  onChooseAvatar,
   onClose,
   onSave,
   visible,
 }: {
+  avatarUrl: string | null;
   email: string;
   error: string | null;
   identity: PatientIdentity;
   isDemo: boolean;
+  onChooseAvatar: () => Promise<string | null>;
   onClose: () => void;
-  onSave: (identity: PatientIdentity) => Promise<string | null>;
+  onSave: (identity: Pick<PatientIdentity, 'fullName' | 'phone'>) => Promise<string | null>;
   visible: boolean;
 }) {
   const [fullName, setFullName] = useState(identity.fullName);
   const [phone, setPhone] = useState(identity.phone);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
@@ -483,8 +566,22 @@ function PatientDetailsModal({
     setMessage(null);
     const saveError = await onSave({ fullName, phone });
     setSaving(false);
-    setSaved(!saveError);
-    setMessage(saveError ?? 'Your patient identity was securely updated.');
+    if (saveError) {
+      setSaved(false);
+      setMessage(saveError);
+      return;
+    }
+
+    onClose();
+  }
+
+  async function chooseAvatar() {
+    setUploadingAvatar(true);
+    setMessage(null);
+    const uploadError = await onChooseAvatar();
+    setUploadingAvatar(false);
+    setSaved(!uploadError);
+    setMessage(uploadError ?? 'Your private profile picture was securely updated.');
   }
 
   return (
@@ -492,9 +589,24 @@ function PatientDetailsModal({
       <View style={styles.modalBackdrop}>
         <View style={styles.modalCard}>
           <ModalHeader onClose={onClose} title="Patient details" />
-          <View style={styles.informationIcon}>
-            <Icon name={{ ios: 'person.crop.circle.fill', android: 'account_circle', web: 'account_circle' }} size={27} />
+          <View style={[styles.informationIcon, avatarUrl && styles.informationAvatar]}>
+            {avatarUrl
+              ? <Image contentFit="cover" source={{ uri: avatarUrl }} style={styles.informationAvatarImage} />
+              : <Icon name={{ ios: 'person.crop.circle.fill', android: 'account_circle', web: 'account_circle' }} size={27} />}
           </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={isDemo || uploadingAvatar}
+            onPress={() => void chooseAvatar()}
+            style={[styles.avatarPickerButton, isDemo && styles.identityInputDisabled]}>
+            {uploadingAvatar
+              ? <ActivityIndicator color={colors.teal} />
+              : <Icon name={{ ios: 'photo.on.rectangle.angled', android: 'add_photo_alternate', web: 'add_photo_alternate' }} size={18} />}
+            <View style={styles.avatarPickerCopy}>
+              <Text style={styles.avatarPickerTitle}>{uploadingAvatar ? 'Uploading securely…' : 'Choose profile picture'}</Text>
+              <Text style={styles.avatarPickerCaption}>{isDemo ? 'Available for secure accounts' : 'Private JPG, PNG, or WebP · maximum 3 MB'}</Text>
+            </View>
+          </Pressable>
           <View style={styles.informationContent}>
             <Text style={styles.identityLabel}>Full name</Text>
             <TextInput
@@ -606,6 +718,7 @@ const styles = StyleSheet.create({
   profileHero: { position: 'relative', overflow: 'hidden', flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 20, padding: 20, paddingBottom: 96, borderRadius: 27, backgroundColor: colors.tealDark },
   profileGlow: { position: 'absolute', width: 180, height: 180, top: -90, right: -60, borderRadius: 90, backgroundColor: colors.teal, opacity: 0.7 },
   avatar: { width: 64, height: 64, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: 'rgba(255,255,255,0.35)', borderRadius: 22, backgroundColor: '#E6F8F3' },
+  avatarImage: { width: '100%', height: '100%', borderRadius: 20 },
   avatarText: { color: colors.tealDark, fontSize: 20, fontWeight: '900' },
   profileIdentity: { flex: 1 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
@@ -658,6 +771,12 @@ const styles = StyleSheet.create({
   clinicOptionIconSelected: { backgroundColor: colors.teal },
   clinicOptionName: { color: colors.ink, fontSize: 10, fontWeight: '800' },
   informationIcon: { width: 58, height: 58, alignSelf: 'center', alignItems: 'center', justifyContent: 'center', marginTop: 18, borderRadius: 20, backgroundColor: colors.tealSoft },
+  informationAvatar: { overflow: 'hidden', borderWidth: 2, borderColor: colors.tealSoft, backgroundColor: colors.card },
+  informationAvatarImage: { width: '100%', height: '100%' },
+  avatarPickerButton: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14, padding: 12, borderWidth: 1, borderColor: colors.line, borderRadius: 15, backgroundColor: '#F5FAF8' },
+  avatarPickerCopy: { flex: 1 },
+  avatarPickerTitle: { color: colors.teal, fontSize: 9, fontWeight: '800' },
+  avatarPickerCaption: { marginTop: 3, color: colors.muted, fontSize: 7, lineHeight: 11 },
   informationContent: { marginTop: 18 },
   infoLine: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: '#EAF1EF' },
   infoLabel: { color: colors.muted, fontSize: 9 },
