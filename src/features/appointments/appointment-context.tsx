@@ -154,8 +154,10 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
         const demoAppointment = createAppointment(
           {
             id: 'novena-medical',
+            slug: 'novena-medical',
             name: 'Novena Medical Clinic',
             specialty: 'Family Medicine',
+            address: '10 Sinaran Drive, Singapore 307506',
             distance: 0.8,
             closesAt: '9:00 PM',
             rating: 4.9,

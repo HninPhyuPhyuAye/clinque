@@ -2,10 +2,11 @@ import { SymbolView } from 'expo-symbols';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { ComponentProps, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, useAppointment } from '@/features/appointments/appointment-context';
+import { supabase } from '@/lib/supabase';
 
 import {
   appointmentDates,
@@ -36,6 +37,8 @@ export function ClinicsFlow() {
   const [bookingStage, setBookingStage] = useState<BookingStage>('details');
   const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
+  const [availableClinics, setAvailableClinics] = useState<Clinic[]>(clinics);
+  const [directoryState, setDirectoryState] = useState<'loading' | 'live' | 'fallback'>('loading');
 
   const requestedFilter = clinicFilters.find((clinicFilter) => clinicFilter === filter);
 
@@ -43,10 +46,53 @@ export function ClinicsFlow() {
     if (requestedFilter) setActiveFilter(requestedFilter);
   }, [requestedFilter]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadClinics() {
+      const { data, error } = await supabase
+        .from('clinics')
+        .select('id, slug, name, specialty, address')
+        .eq('is_active', true)
+        .order('name');
+
+      if (!active) return;
+
+      if (error || !data) {
+        setDirectoryState('fallback');
+        return;
+      }
+
+      const databaseClinics = data.map((clinic, index) => {
+        const presentation = clinics.find((item) => item.slug === clinic.slug) ?? clinics[index % clinics.length] ?? clinics[0];
+
+        if (!presentation) throw new Error('Clinque requires at least one local clinic presentation template.');
+
+        return {
+          ...presentation,
+          id: clinic.id,
+          slug: clinic.slug,
+          name: clinic.name,
+          specialty: clinic.specialty,
+          address: clinic.address,
+        } satisfies Clinic;
+      });
+
+      setAvailableClinics(databaseClinics);
+      setDirectoryState('live');
+    }
+
+    void loadClinics();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const visibleClinics = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
 
-    return clinics.filter((clinic) => {
+    return availableClinics.filter((clinic) => {
       const matchesFilter = clinic.categories.includes(activeFilter);
       const matchesQuery =
         normalizedQuery.length === 0 ||
@@ -55,7 +101,7 @@ export function ClinicsFlow() {
 
       return matchesFilter && matchesQuery;
     });
-  }, [activeFilter, query]);
+  }, [activeFilter, availableClinics, query]);
 
   if (selectedClinic && bookingStage === 'schedule') {
     return (
@@ -198,8 +244,22 @@ export function ClinicsFlow() {
 
           <View style={styles.resultHeader}>
             <Text style={styles.sectionTitle}>Recommended clinics</Text>
-            <Text style={styles.resultCount}>{visibleClinics.length} RESULTS</Text>
+            <View style={styles.directoryStatus}>
+              {directoryState === 'loading' && <ActivityIndicator color={colors.teal} size="small" />}
+              <View style={[styles.directoryDot, directoryState === 'fallback' && styles.directoryDotFallback]} />
+              <Text style={styles.directoryStatusText}>
+                {directoryState === 'loading' ? 'SYNCING' : directoryState === 'live' ? 'LIVE DIRECTORY' : 'CACHED DEMO'}
+              </Text>
+              <Text style={styles.resultCount}>{visibleClinics.length} RESULTS</Text>
+            </View>
           </View>
+
+          {directoryState === 'fallback' && (
+            <View style={styles.fallbackNotice}>
+              <Icon name={{ ios: 'wifi.slash', android: 'wifi_off', web: 'wifi_off' }} color="#8A5B1F" size={16} />
+              <Text style={styles.fallbackNoticeText}>The live directory is unavailable, so Clinque is showing cached demonstration clinics.</Text>
+            </View>
+          )}
 
           <View style={styles.clinicList}>
             {visibleClinics.map((clinic) => (
@@ -359,7 +419,7 @@ function ClinicDetail({
           <View style={styles.informationCard}>
             <InformationRow
               icon={{ ios: 'location', android: 'location_on', web: 'location_on' }}
-              title="10 Sinaran Drive, Singapore 307506"
+              title={clinic.address}
               caption={`${clinic.distance.toFixed(1)} km from your location`}
             />
             <View style={styles.informationDivider} />
@@ -927,6 +987,42 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: '800',
     letterSpacing: 0.7,
+  },
+  directoryStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    gap: 6,
+  },
+  directoryDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.teal,
+  },
+  directoryDotFallback: {
+    backgroundColor: '#B97924',
+  },
+  directoryStatusText: {
+    color: colors.teal,
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  fallbackNotice: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 12,
+    padding: 11,
+    borderRadius: 14,
+    backgroundColor: '#FFF2D8',
+  },
+  fallbackNoticeText: {
+    flex: 1,
+    color: '#76521B',
+    fontSize: 9,
+    lineHeight: 14,
   },
   clinicList: {
     gap: 12,

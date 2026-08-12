@@ -2,8 +2,10 @@ export type ClinicFilter = 'Nearby' | 'Open now' | 'GP' | 'Dental';
 
 export type Clinic = {
   id: string;
+  slug: string;
   name: string;
   specialty: string;
+  address: string;
   distance: number;
   closesAt: string;
   rating: number;
@@ -46,8 +48,10 @@ export const visitReasons = ['General consultation', 'Health screening', 'Vaccin
 export const clinics: Clinic[] = [
   {
     id: 'novena-medical',
+    slug: 'novena-medical',
     name: 'Novena Medical Clinic',
     specialty: 'Family Medicine',
+    address: '10 Sinaran Drive, Singapore 307506',
     distance: 0.8,
     closesAt: '9:00 PM',
     rating: 4.9,
@@ -59,8 +63,10 @@ export const clinics: Clinic[] = [
   },
   {
     id: 'orchard-family',
+    slug: 'orchard-family',
     name: 'Orchard Family Clinic',
     specialty: 'General Practice',
+    address: '290 Orchard Road, Singapore 238859',
     distance: 1.4,
     closesAt: '7:30 PM',
     rating: 4.8,
@@ -72,8 +78,10 @@ export const clinics: Clinic[] = [
   },
   {
     id: 'smile-dental',
+    slug: 'smile-dental',
     name: 'Smileworks Dental Studio',
     specialty: 'General Dentistry',
+    address: '6 Scotts Road, Singapore 228209',
     distance: 2.1,
     closesAt: '8:00 PM',
     rating: 4.7,
