@@ -6,6 +6,8 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, type CareTask, type CompletedVisit, useAppointment } from '@/features/appointments/appointment-context';
+import { CareNavigator } from '@/features/care-navigator/care-navigator';
+import type { ClinicFilter } from '@/features/clinics/clinic-data';
 import { type ClinqueNotification, useNotifications } from '@/features/notifications/notification-context';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -60,6 +62,7 @@ export default function HomeScreen() {
   const { markAllRead, notifications, unreadCount } = useNotifications();
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [carePlanVisible, setCarePlanVisible] = useState(false);
+  const [careNavigatorVisible, setCareNavigatorVisible] = useState(false);
   const latestVisit = visitHistory[0];
 
   function openQueue() {
@@ -129,6 +132,18 @@ export default function HomeScreen() {
           {latestVisit && (
             <RecoveryPlanCard onOpen={() => setCarePlanVisible(true)} visit={latestVisit} />
           )}
+
+          <Pressable accessibilityRole="button" onPress={() => setCareNavigatorVisible(true)} style={styles.navigatorCard}>
+            <View style={styles.navigatorIcon}>
+              <Icon name={{ ios: 'sparkles', android: 'route', web: 'route' }} color={colors.teal} size={22} />
+            </View>
+            <View style={styles.navigatorCopy}>
+              <Text style={styles.navigatorEyebrow}>NOT SURE WHERE TO START?</Text>
+              <Text style={styles.navigatorTitle}>Try Care Navigator</Text>
+              <Text style={styles.navigatorCaption}>Answer a few questions to find an appropriate care setting.</Text>
+            </View>
+            <Icon name={{ ios: 'arrow.right', android: 'arrow_forward', web: 'arrow_forward' }} color={colors.teal} size={19} />
+          </Pressable>
 
           <View style={styles.sectionHeader}>
             <Text style={styles.sectionTitle}>How can we help?</Text>
@@ -203,6 +218,18 @@ export default function HomeScreen() {
         onToggle={(taskId) => void toggleCareTask(latestVisit?.id ?? '', taskId)}
         visible={carePlanVisible}
         visit={latestVisit}
+      />
+      <CareNavigator
+        onClose={() => setCareNavigatorVisible(false)}
+        onFindClinics={(filter: ClinicFilter) => {
+          setCareNavigatorVisible(false);
+          if (Platform.OS === 'web' && typeof window !== 'undefined') {
+            window.location.assign(`/explore?filter=${filter}`);
+            return;
+          }
+          router.push({ pathname: '/explore', params: { filter } });
+        }}
+        visible={careNavigatorVisible}
       />
     </View>
   );
@@ -524,6 +551,12 @@ const styles = StyleSheet.create({
   recoveryFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 9 },
   recoveryProgressText: { color: 'rgba(255,255,255,0.72)', fontSize: 8 },
   recoveryAction: { color: '#C7F2E9', fontSize: 8, fontWeight: '800' },
+  navigatorCard: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 14, padding: 16, borderWidth: 1, borderColor: '#CFE5E1', borderRadius: 22, backgroundColor: '#F9FEFC' },
+  navigatorIcon: { width: 47, height: 47, alignItems: 'center', justifyContent: 'center', borderRadius: 16, backgroundColor: colors.tealSoft },
+  navigatorCopy: { flex: 1 },
+  navigatorEyebrow: { color: colors.teal, fontSize: 7, fontWeight: '900', letterSpacing: 0.7 },
+  navigatorTitle: { marginTop: 4, color: colors.ink, fontSize: 12, fontWeight: '800' },
+  navigatorCaption: { marginTop: 3, color: colors.muted, fontSize: 8, lineHeight: 12 },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(10,35,39,0.38)' },
   modalDismissArea: { flex: 1 },
   notificationSheet: { width: '100%', maxHeight: '72%', alignSelf: 'center', paddingHorizontal: 20, paddingTop: 10, paddingBottom: 18, borderTopLeftRadius: 30, borderTopRightRadius: 30, backgroundColor: colors.card },

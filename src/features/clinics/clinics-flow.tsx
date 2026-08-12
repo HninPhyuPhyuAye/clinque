@@ -1,7 +1,7 @@
 import { SymbolView } from 'expo-symbols';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import type { ComponentProps, ReactNode } from 'react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -28,6 +28,7 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 
 export function ClinicsFlow() {
   const router = useRouter();
+  const { filter } = useLocalSearchParams<{ filter?: string }>();
   const { saveAppointment } = useAppointment();
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState<ClinicFilter>('Nearby');
@@ -35,6 +36,12 @@ export function ClinicsFlow() {
   const [bookingStage, setBookingStage] = useState<BookingStage>('details');
   const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
   const [confirmedAppointment, setConfirmedAppointment] = useState<Appointment | null>(null);
+
+  const requestedFilter = clinicFilters.find((clinicFilter) => clinicFilter === filter);
+
+  useEffect(() => {
+    if (requestedFilter) setActiveFilter(requestedFilter);
+  }, [requestedFilter]);
 
   const visibleClinics = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
