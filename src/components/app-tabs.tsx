@@ -5,6 +5,7 @@ import { useColorScheme } from 'react-native';
 import { Colors } from '@/constants/theme';
 import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
 import { ClinicOperationsScreen } from '@/features/operations/clinic-operations-screen';
+import { ResetPasswordScreen } from '@/features/auth/reset-password-screen';
 
 export default function AppTabs() {
   const pathname = usePathname();
@@ -17,6 +18,10 @@ export default function AppTabs() {
 
   if (pathname === '/operations') {
     return <ClinicOperationsScreen />;
+  }
+
+  if (pathname === '/reset-password') {
+    return <ResetPasswordScreen />;
   }
 
   return (
@@ -58,6 +63,7 @@ export default function AppTabs() {
 
       <NativeTabs.Trigger hidden name="queue" />
       <NativeTabs.Trigger hidden name="operations" />
+      <NativeTabs.Trigger hidden name="reset-password" />
     </NativeTabs>
   );
 }

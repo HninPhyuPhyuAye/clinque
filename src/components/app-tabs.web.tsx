@@ -13,6 +13,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
 import { ClinicOperationsScreen } from '@/features/operations/clinic-operations-screen';
+import { ResetPasswordScreen } from '@/features/auth/reset-password-screen';
 
 export default function AppTabs() {
   const pathname = usePathname();
@@ -25,6 +26,10 @@ export default function AppTabs() {
 
   if (pathname === '/operations') {
     return <ClinicOperationsScreen />;
+  }
+
+  if (pathname === '/reset-password') {
+    return <ResetPasswordScreen />;
   }
 
   return (
@@ -59,6 +64,7 @@ export default function AppTabs() {
           </TabTrigger>
           <TabTrigger name="queue" href="/queue" style={styles.hiddenTab} />
           <TabTrigger name="operations" href="/operations" style={styles.hiddenTab} />
+          <TabTrigger name="reset-password" href="/reset-password" style={styles.hiddenTab} />
         </ClinqueTabBar>
       </TabList>
     </Tabs>
