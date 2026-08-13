@@ -11,51 +11,74 @@ import { SymbolView } from 'expo-symbols';
 import type { ComponentProps } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { LiveQueueScreen } from '@/features/queue/live-queue-screen';
-import { ClinicOperationsScreen } from '@/features/operations/clinic-operations-screen';
+import { useAuth } from '@/features/auth/auth-context';
 import { ResetPasswordScreen } from '@/features/auth/reset-password-screen';
+import { VerifyEmailScreen } from '@/features/auth/verify-email-screen';
 
 export default function AppTabs() {
   const pathname = usePathname();
-
-  // The queue is a focused detail screen, not a tab destination. Rendering it
-  // outside the custom tab slot also makes direct browser refreshes reliable.
-  if (pathname === '/queue') {
-    return <LiveQueueScreen />;
-  }
-
-  if (pathname === '/operations') {
-    return <ClinicOperationsScreen />;
-  }
+  const { isNurse } = useAuth();
 
   if (pathname === '/reset-password') {
     return <ResetPasswordScreen />;
   }
 
+  if (pathname === '/verify-email') {
+    return <VerifyEmailScreen />;
+  }
+
+  // The queue, and the patient-side operations board, are focused detail screens
+  // that hide the tab bar. They still render INSIDE the navigator. Returning
+  // them from here instead unmounted the navigator mid-navigation, which is why
+  // router.push('/queue') from Home silently did nothing.
+  const hideTabBar =
+    pathname === '/queue' || (!isNurse && pathname === '/operations');
+
   return (
     <Tabs>
       <TabSlot style={styles.slot} />
       <TabList asChild>
-        <ClinqueTabBar>
+        <ClinqueTabBar hidden={hideTabBar}>
           <TabTrigger name="home" href="/" asChild>
             <TabButton label="Home" icon={{ ios: 'house.fill', android: 'home', web: 'home' }} />
           </TabTrigger>
-          <TabTrigger name="clinics" href="/explore" asChild>
-            <TabButton
-              label="Clinics"
-              icon={{ ios: 'cross.case', android: 'local_hospital', web: 'local_hospital' }}
-            />
-          </TabTrigger>
-          <TabTrigger name="journey" href="/journey" asChild>
-            <TabButton
-              label="Journey"
-              icon={{
-                ios: 'point.bottomleft.forward.to.point.topright.scurvepath',
-                android: 'route',
-                web: 'route',
-              }}
-            />
-          </TabTrigger>
+
+          {/* Booking and a personal journey belong to patients. Nurses swap them
+              for the queue board they actually work from. Both trigger sets stay
+              mounted so every route keeps a target. */}
+          {isNurse ? (
+            <>
+              <TabTrigger name="operations" href="/operations" asChild>
+                <TabButton
+                  label="Queue"
+                  icon={{ ios: 'person.2.fill', android: 'groups', web: 'groups' }}
+                />
+              </TabTrigger>
+              <TabTrigger name="clinics" href="/explore" style={styles.hiddenTab} />
+              <TabTrigger name="journey" href="/journey" style={styles.hiddenTab} />
+            </>
+          ) : (
+            <>
+              <TabTrigger name="clinics" href="/explore" asChild>
+                <TabButton
+                  label="Clinics"
+                  icon={{ ios: 'cross.case', android: 'local_hospital', web: 'local_hospital' }}
+                />
+              </TabTrigger>
+              <TabTrigger name="journey" href="/journey" asChild>
+                <TabButton
+                  label="Journey"
+                  icon={{
+                    ios: 'point.bottomleft.forward.to.point.topright.scurvepath',
+                    android: 'route',
+                    web: 'route',
+                  }}
+                />
+              </TabTrigger>
+              <TabTrigger name="operations" href="/operations" style={styles.hiddenTab} />
+            </>
+          )}
+
           <TabTrigger name="profile" href="/profile" asChild>
             <TabButton
               label="Profile"
@@ -63,17 +86,17 @@ export default function AppTabs() {
             />
           </TabTrigger>
           <TabTrigger name="queue" href="/queue" style={styles.hiddenTab} />
-          <TabTrigger name="operations" href="/operations" style={styles.hiddenTab} />
           <TabTrigger name="reset-password" href="/reset-password" style={styles.hiddenTab} />
+          <TabTrigger name="verify-email" href="/verify-email" style={styles.hiddenTab} />
         </ClinqueTabBar>
       </TabList>
     </Tabs>
   );
 }
 
-function ClinqueTabBar(props: TabListProps) {
+function ClinqueTabBar({ hidden, ...props }: TabListProps & { hidden?: boolean }) {
   return (
-    <View {...props} style={styles.tabPositioner}>
+    <View {...props} style={[styles.tabPositioner, hidden && styles.hiddenTab]}>
       <View style={styles.tabBar}>
         <View style={styles.brandMark}>
           <Text style={styles.brandLetter}>C</Text>

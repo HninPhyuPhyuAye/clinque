@@ -61,11 +61,6 @@ export function JourneyScreen() {
   }, [tab]);
 
   function openQueue() {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.assign('/queue');
-      return;
-    }
-
     router.push('/queue');
   }
 
@@ -197,7 +192,13 @@ function CurrentJourney({
               {appointment.queue
                 ? appointment.queue.status === 'called'
                   ? 'Doctor is ready'
-                  : `Queue #${appointment.queue.position} · ${appointment.queue.estimatedMinutes} min`
+                  : appointment.queue.status === 'consulting'
+                    ? 'Consultation in progress'
+                    : appointment.queue.status === 'completed'
+                      ? 'Visit complete'
+                      : appointment.queue.position === 0
+                        ? 'You are next'
+                        : `Queue #${appointment.queue.position} · ${appointment.queue.estimatedMinutes} min`
                 : `${appointment.waitMinutes}–${appointment.waitMinutes + 6} min wait`}
             </Text>
           </View>

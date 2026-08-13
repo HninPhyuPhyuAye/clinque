@@ -6,7 +6,9 @@ import { Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from '
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { type Appointment, type CareTask, type CompletedVisit, useAppointment } from '@/features/appointments/appointment-context';
+import { useAuth } from '@/features/auth/auth-context';
 import { CareNavigator } from '@/features/care-navigator/care-navigator';
+import { NurseHomeScreen } from '@/features/operations/nurse-home-screen';
 import type { ClinicFilter } from '@/features/clinics/clinic-data';
 import { type ClinqueNotification, useNotifications } from '@/features/notifications/notification-context';
 
@@ -60,17 +62,21 @@ export default function HomeScreen() {
   const router = useRouter();
   const { appointment, loading, toggleCareTask, visitHistory } = useAppointment();
   const { markAllRead, notifications, unreadCount } = useNotifications();
+  const { fullName, isDemo, isNurse, nurseError } = useAuth();
+  // Demo mode keeps the portfolio persona; a real account greets its own name.
+  const greetingName = isDemo
+    ? 'Maya'
+    : (fullName?.trim().split(/\s+/)[0] ?? 'there');
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [carePlanVisible, setCarePlanVisible] = useState(false);
   const [careNavigatorVisible, setCareNavigatorVisible] = useState(false);
   const latestVisit = visitHistory[0];
 
-  function openQueue() {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.assign('/queue');
-      return;
-    }
+  // Nurses get their own dashboard at this route. All hooks above have already
+  // run, so the early return is safe.
+  if (isNurse) return <NurseHomeScreen />;
 
+  function openQueue() {
     router.push('/queue');
   }
 
@@ -97,7 +103,7 @@ export default function HomeScreen() {
           <View style={styles.header}>
             <View>
               <Text style={styles.eyebrow}>GOOD MORNING</Text>
-              <Text style={styles.greeting}>Maya</Text>
+              <Text style={styles.greeting}>{greetingName}</Text>
             </View>
 
             <Pressable
@@ -119,6 +125,19 @@ export default function HomeScreen() {
               )}
             </Pressable>
           </View>
+
+          {/* Without this, an account that signed up as a nurse but has no
+              clinic assignment just renders the patient app, which is
+              indistinguishable from the role being wrong. */}
+          {nurseError && (
+            <View style={styles.roleWarning}>
+              <Text style={styles.roleWarningTitle}>Nurse access not active</Text>
+              <Text style={styles.roleWarningText}>
+                This account was created as a nurse, but Clinque could not load a
+                clinic assignment, so it is showing the patient app. {nurseError}
+              </Text>
+            </View>
+          )}
 
           {loading && <AppointmentLoadingCard />}
           {!loading && appointment && (
@@ -223,10 +242,6 @@ export default function HomeScreen() {
         onClose={() => setCareNavigatorVisible(false)}
         onFindClinics={(filter: ClinicFilter) => {
           setCareNavigatorVisible(false);
-          if (Platform.OS === 'web' && typeof window !== 'undefined') {
-            window.location.assign(`/explore?filter=${filter}`);
-            return;
-          }
           router.push({ pathname: '/explore', params: { filter } });
         }}
         visible={careNavigatorVisible}
@@ -439,7 +454,13 @@ function HomeAppointmentCard({ appointment, onAction }: { appointment: Appointme
             {appointment.queue
               ? appointment.queue.status === 'called'
                 ? 'Doctor is ready'
-                : `Position #${appointment.queue.position} · ${appointment.queue.estimatedMinutes} min`
+                : appointment.queue.status === 'consulting'
+                  ? 'Consultation in progress'
+                  : appointment.queue.status === 'completed'
+                    ? 'Visit complete'
+                    : appointment.queue.position === 0
+                      ? 'You are next'
+                      : `Position #${appointment.queue.position} · ${appointment.queue.estimatedMinutes} min`
               : `${appointment.waitMinutes}–${appointment.waitMinutes + 6} minutes`}
           </Text>
         </View>
@@ -788,6 +809,14 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     backgroundColor: colors.card,
   },
+  roleWarning: {
+    marginTop: 18,
+    padding: 15,
+    borderRadius: 18,
+    backgroundColor: '#FDECEC',
+  },
+  roleWarningTitle: { color: '#8C2F2F', fontSize: 13, fontWeight: '800' },
+  roleWarningText: { marginTop: 5, color: '#8C2F2F', fontSize: 11, lineHeight: 16 },
   historyIcon: {
     width: 48,
     height: 48,

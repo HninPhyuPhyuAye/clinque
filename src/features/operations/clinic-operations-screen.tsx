@@ -12,8 +12,10 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { useAppointment } from "@/features/appointments/appointment-context";
+import { useAuth } from "@/features/auth/auth-context";
 import { clinqueColors as colors } from "@/features/clinics/clinque-theme";
 import { useNotifications } from "@/features/notifications/notification-context";
+import { useNurseQueue } from "@/features/operations/nurse-queue-context";
 
 type SymbolName = ComponentProps<typeof SymbolView>["name"];
 
@@ -41,12 +43,12 @@ function readErrorMessage(error: unknown): string {
   return "Unknown error";
 }
 
-// Postgres raises 42501 from the lifecycle functions when the caller does not
-// staff the clinic. That is the expected outcome for a signed-in patient, so it
-// gets a plain explanation rather than a raw database string.
+// Postgres raises 42501 from the lifecycle functions when the caller is not a
+// nurse at the clinic. That is the expected outcome for a signed-in patient, so
+// it gets a plain explanation rather than a raw database string.
 function describeTransitionError(message: string) {
-  if (/only clinic staff/i.test(message))
-    return "This account is not clinic staff for this clinic, so it cannot move the queue. Use demo mode, or grant the account staff access in Supabase.";
+  if (/only clinic nurses/i.test(message))
+    return "This account is not a nurse at this clinic, so it cannot move the queue. Register the account as a nurse for this clinic, or use the nurse demo.";
 
   if (/cannot be advanced|cannot start|cannot be completed/i.test(message))
     return "The queue moved since this screen loaded. Reload to see its current state.";
@@ -69,8 +71,28 @@ function Icon({
   return <SymbolView name={name} tintColor={color} size={size} />;
 }
 
+// One shape for the board, whether the row came from the clinic's real queue or
+// from the local portfolio demo.
+type BoardPatient = {
+  appointmentId: string | null;
+  confirmationCode: string;
+  doctorName: string;
+  estimatedMinutes: number;
+  initials: string;
+  name: string;
+  position: number;
+  reason: string;
+  status: "waiting" | "called" | "consulting" | "completed";
+};
+
+function initialsOf(name: string) {
+  const parts = name.trim().split(/\s+/).slice(0, 2);
+  return parts.map((part) => part[0]?.toUpperCase() ?? "").join("") || "P";
+}
+
 export function ClinicOperationsScreen() {
   const router = useRouter();
+  const { isDemo, nurseClinic, nurseLoading, user } = useAuth();
   const {
     advanceQueue,
     appointment,
@@ -82,10 +104,21 @@ export function ClinicOperationsScreen() {
   const { addQueueAlert } = useNotifications();
   const [actionError, setActionError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [selectedAppointmentId, setSelectedAppointmentId] = useState<
+    string | null
+  >(null);
 
-  // Queue transitions run as SECURITY DEFINER functions that check clinic_staff
-  // membership, so a signed-in patient opening this screen gets a real 42501
-  // rather than an update that silently affects no rows.
+  const {
+    advance,
+    complete,
+    entries: nurseEntries,
+    error: nurseQueueError,
+    isDemoQueue,
+    loading: nurseQueueLoading,
+    reload: reloadNurseQueue,
+    start,
+  } = useNurseQueue();
+
   async function runTransition<T>(
     transition: () => Promise<T>,
   ): Promise<T | null> {
@@ -102,28 +135,101 @@ export function ClinicOperationsScreen() {
   }
 
   function returnToPatientApp() {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      window.location.assign("/");
-      return;
-    }
     router.replace("/");
   }
 
   function openPatientQueue() {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      window.location.assign("/queue");
-      return;
-    }
     router.replace("/queue");
   }
 
-  if (loading) return <View style={styles.screen} />;
+  if (loading || nurseLoading) return <View style={styles.screen} />;
 
-  const queue = appointment?.queue;
-  const called = queue?.status === "called";
-  const consulting = queue?.status === "consulting";
-  const completed = queue?.status === "completed";
-  const totalWaiting = queue ? Math.max(queue.position, 1) + 3 : 0;
+  // Three distinct experiences. A nurse drives their own clinic's live
+  // queue; demo mode drives a local portfolio queue; a signed-in patient is told
+  // plainly that this screen is not theirs to drive, rather than being handed a
+  // demo button whose local appointment id can never reach the database.
+  const mode: "nurse" | "demo" | "patient" = nurseClinic
+    ? "nurse"
+    : user && !isDemo
+      ? "patient"
+      : "demo";
+
+  const demoQueue = appointment?.queue;
+  const board: BoardPatient[] =
+    mode === "nurse"
+      ? nurseEntries.map((entry) => ({
+          appointmentId: entry.appointmentId,
+          confirmationCode: entry.confirmationCode,
+          doctorName: entry.doctorName,
+          estimatedMinutes: entry.estimatedMinutes,
+          initials: initialsOf(entry.patientName),
+          name: entry.patientName,
+          position: entry.position,
+          reason: entry.reason,
+          status: entry.status === "cancelled" ? "waiting" : entry.status,
+        }))
+      : demoQueue
+        ? [
+            {
+              appointmentId: null,
+              confirmationCode: appointment?.confirmationCode ?? "CQ-20418",
+              doctorName: appointment?.doctorName ?? "Dr. Sarah Lim",
+              estimatedMinutes: demoQueue.estimatedMinutes,
+              initials: "MT",
+              name: "Maya Tan",
+              position: demoQueue.position,
+              reason: appointment?.reason ?? "General consultation",
+              status: demoQueue.status,
+            },
+          ]
+        : [];
+
+  const active =
+    board.find((patient) => patient.appointmentId === selectedAppointmentId) ??
+    board[0] ??
+    null;
+
+  const called = active?.status === "called";
+  const consulting = active?.status === "consulting";
+  const completed = active?.status === "completed";
+
+  // Nurses see the real count. Demo keeps the three mock companions so the
+  // portfolio board does not look empty.
+  const totalWaiting =
+    mode === "nurse"
+      ? board.length
+      : active
+        ? Math.max(active.position, 1) + 3
+        : 0;
+
+  async function onPrimaryAction() {
+    if (!active || completed || pending) return;
+
+    if (mode === "nurse") {
+      const appointmentId = active.appointmentId;
+      if (!appointmentId) return;
+
+      await runTransition(async () => {
+        if (consulting) await complete(appointmentId);
+        else if (called) await start(appointmentId);
+        else await advance(appointmentId);
+        return true;
+      });
+      return;
+    }
+
+    if (consulting) {
+      await runTransition(completeConsultation);
+      return;
+    }
+    if (called) {
+      await runTransition(startConsultation);
+      return;
+    }
+
+    const updatedAppointment = await runTransition(advanceQueue);
+    if (updatedAppointment) await addQueueAlert(updatedAppointment);
+  }
 
   return (
     <View style={styles.screen}>
@@ -149,7 +255,13 @@ export function ClinicOperationsScreen() {
               />
             </Pressable>
             <View style={styles.headerCopy}>
-              <Text style={styles.eyebrow}>CLINIC OPERATIONS · STAFF DEMO</Text>
+              <Text style={styles.eyebrow}>
+                {mode === "nurse"
+                  ? "CLINIC OPERATIONS · NURSE"
+                  : mode === "patient"
+                    ? "CLINIC OPERATIONS · RESTRICTED"
+                    : "CLINIC OPERATIONS · NURSE DEMO"}
+              </Text>
               <Text style={styles.title}>Queue command centre</Text>
             </View>
             <View style={styles.livePill}>
@@ -170,13 +282,73 @@ export function ClinicOperationsScreen() {
               />
             </View>
             <View style={styles.clinicCopy}>
-              <Text style={styles.clinicName}>Novena Medical Clinic</Text>
-              <Text style={styles.clinicMeta}>Family Medicine · Level 2</Text>
+              <Text style={styles.clinicName}>
+                {nurseClinic?.name ?? "Novena Medical Clinic"}
+              </Text>
+              <Text style={styles.clinicMeta}>
+                {nurseClinic
+                  ? `${nurseClinic.specialty} · ${nurseClinic.address}`
+                  : "Family Medicine · Level 2"}
+              </Text>
             </View>
             <Text style={styles.shiftText}>Morning shift</Text>
           </View>
 
-          {!queue ? (
+          {mode === "patient" ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIcon}>
+                <Icon
+                  name={{ ios: "lock.fill", android: "lock", web: "lock" }}
+                  size={29}
+                />
+              </View>
+              <Text style={styles.emptyTitle}>Nurse access required</Text>
+              <Text style={styles.emptyCaption}>
+                Queue and consultation transitions belong to authorized clinic
+                nurses. This account is signed in as a patient, so the clinic
+                queue is not available here. Your own visit status stays on the
+                live queue screen.
+              </Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={openPatientQueue}
+                style={styles.primaryButton}
+              >
+                <Icon
+                  name={{
+                    ios: "list.bullet.rectangle",
+                    android: "list_alt",
+                    web: "list_alt",
+                  }}
+                  color="#FFFFFF"
+                  size={18}
+                />
+                <Text style={styles.primaryButtonText}>View my live queue</Text>
+              </Pressable>
+            </View>
+          ) : nurseQueueError ? (
+            <View style={styles.emptyCard}>
+              <View style={styles.emptyIcon}>
+                <Icon
+                  name={{
+                    ios: "exclamationmark.triangle.fill",
+                    android: "warning",
+                    web: "warning",
+                  }}
+                  size={29}
+                />
+              </View>
+              <Text style={styles.emptyTitle}>Queue unavailable</Text>
+              <Text style={styles.emptyCaption}>{nurseQueueError}</Text>
+              <Pressable
+                accessibilityRole="button"
+                onPress={() => void reloadNurseQueue()}
+                style={styles.primaryButton}
+              >
+                <Text style={styles.primaryButtonText}>Try again</Text>
+              </Pressable>
+            </View>
+          ) : !active ? (
             <View style={styles.emptyCard}>
               <View style={styles.emptyIcon}>
                 <Icon
@@ -188,29 +360,55 @@ export function ClinicOperationsScreen() {
                   size={29}
                 />
               </View>
-              <Text style={styles.emptyTitle}>No active patient queue</Text>
-              <Text style={styles.emptyCaption}>
-                Load a safe demonstration queue to explore the staff workflow
-                without a clinic backend.
+              <Text style={styles.emptyTitle}>
+                {mode === "nurse"
+                  ? nurseQueueLoading
+                    ? "Loading clinic queue"
+                    : "No patients in the queue"
+                  : "No active patient queue"}
               </Text>
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void createDemoQueue()}
-                style={styles.primaryButton}
-              >
-                <Icon
-                  name={{
-                    ios: "play.fill",
-                    android: "play_arrow",
-                    web: "play_arrow",
-                  }}
-                  color="#FFFFFF"
-                  size={18}
-                />
-                <Text style={styles.primaryButtonText}>
-                  Load demonstration queue
-                </Text>
-              </Pressable>
+              <Text style={styles.emptyCaption}>
+                {mode === "nurse"
+                  ? `Patients appear here the moment a signed-in account checks in at ${nurseClinic?.name ?? "this clinic"}. Portfolio demo sessions stay on their own device and never reach this board.`
+                  : "Load a safe demonstration queue to explore the nurse workflow without a clinic backend."}
+              </Text>
+              {mode === "nurse" ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void reloadNurseQueue()}
+                  style={styles.primaryButton}
+                >
+                  <Icon
+                    name={{
+                      ios: "arrow.clockwise",
+                      android: "refresh",
+                      web: "refresh",
+                    }}
+                    color="#FFFFFF"
+                    size={18}
+                  />
+                  <Text style={styles.primaryButtonText}>Refresh queue</Text>
+                </Pressable>
+              ) : (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void createDemoQueue()}
+                  style={styles.primaryButton}
+                >
+                  <Icon
+                    name={{
+                      ios: "play.fill",
+                      android: "play_arrow",
+                      web: "play_arrow",
+                    }}
+                    color="#FFFFFF"
+                    size={18}
+                  />
+                  <Text style={styles.primaryButtonText}>
+                    Load demonstration queue
+                  </Text>
+                </Pressable>
+              )}
             </View>
           ) : (
             <>
@@ -228,7 +426,7 @@ export function ClinicOperationsScreen() {
                 />
                 <MetricCard
                   label="AVG WAIT"
-                  value={`${queue.estimatedMinutes}`}
+                  value={`${active.estimatedMinutes}`}
                   caption="minutes"
                   icon={{
                     ios: "clock.fill",
@@ -271,21 +469,23 @@ export function ClinicOperationsScreen() {
                 </Text>
                 <View style={styles.patientRow}>
                   <View style={styles.patientAvatar}>
-                    <Text style={styles.patientInitials}>MT</Text>
+                    <Text style={styles.patientInitials}>
+                      {active.initials}
+                    </Text>
                   </View>
                   <View style={styles.patientCopy}>
-                    <Text style={styles.patientName}>Maya Tan</Text>
+                    <Text style={styles.patientName}>{active.name}</Text>
                     <Text style={styles.patientMeta}>
-                      CQ-20418 · General consultation
+                      {active.confirmationCode} · {active.reason}
                     </Text>
                     <Text style={styles.patientPosition}>
                       {completed
                         ? "Summary released to Journey"
                         : consulting
-                          ? "With Dr. Sarah Lim in Room 3"
+                          ? `With ${active.doctorName} in Room 3`
                           : called
                             ? "Proceed to Room 3"
-                            : `Patient queue position #${queue.position}`}
+                            : `Patient queue position #${active.position}`}
                     </Text>
                   </View>
                   <View style={styles.arrivedPill}>
@@ -296,21 +496,7 @@ export function ClinicOperationsScreen() {
                 <Pressable
                   accessibilityRole="button"
                   disabled={completed || pending}
-                  onPress={async () => {
-                    if (completed || pending) return;
-                    if (consulting) {
-                      await runTransition(completeConsultation);
-                      return;
-                    }
-                    if (called) {
-                      await runTransition(startConsultation);
-                      return;
-                    }
-
-                    const updatedAppointment = await runTransition(advanceQueue);
-                    if (updatedAppointment)
-                      await addQueueAlert(updatedAppointment);
-                  }}
+                  onPress={onPrimaryAction}
                   style={[
                     styles.callButton,
                     (completed || pending) && styles.callButtonDisabled,
@@ -369,25 +555,55 @@ export function ClinicOperationsScreen() {
                 <Text style={styles.sectionMeta}>{totalWaiting} PATIENTS</Text>
               </View>
               <View style={styles.waitingList}>
-                {!called && !consulting && !completed && (
-                  <PatientListItem
-                    initials="MT"
-                    name="Maya Tan"
-                    position={`#${queue.position}`}
-                    reason="General consultation"
-                    highlighted
-                  />
-                )}
-                {mockPatients.map((patient, index) => (
-                  <PatientListItem
-                    initials={patient.initials}
-                    key={patient.name}
-                    name={patient.name}
-                    position={`#${Math.max((queue.position || 1) + index + 1, index + 2)}`}
-                    reason={patient.reason}
-                    wait={patient.wait}
-                  />
-                ))}
+                {mode === "nurse"
+                  ? board.map((patient) => (
+                      <Pressable
+                        accessibilityRole="button"
+                        key={patient.appointmentId ?? patient.name}
+                        onPress={() =>
+                          setSelectedAppointmentId(patient.appointmentId)
+                        }
+                      >
+                        <PatientListItem
+                          highlighted={
+                            patient.appointmentId === active.appointmentId
+                          }
+                          initials={patient.initials}
+                          name={patient.name}
+                          position={`#${patient.position}`}
+                          reason={patient.reason}
+                          wait={
+                            patient.status === "consulting"
+                              ? "In consultation"
+                              : patient.status === "called"
+                                ? "Called"
+                                : "Checked in"
+                          }
+                        />
+                      </Pressable>
+                    ))
+                  : [
+                      !called && !consulting && !completed ? (
+                        <PatientListItem
+                          highlighted
+                          initials={active.initials}
+                          key="active"
+                          name={active.name}
+                          position={`#${active.position}`}
+                          reason={active.reason}
+                        />
+                      ) : null,
+                      ...mockPatients.map((patient, index) => (
+                        <PatientListItem
+                          initials={patient.initials}
+                          key={patient.name}
+                          name={patient.name}
+                          position={`#${Math.max(active.position + index + 1, index + 2)}`}
+                          reason={patient.reason}
+                          wait={patient.wait}
+                        />
+                      )),
+                    ]}
               </View>
 
               <View style={styles.syncCard}>
@@ -403,19 +619,30 @@ export function ClinicOperationsScreen() {
                   />
                 </View>
                 <View style={styles.syncCopy}>
-                  <Text style={styles.syncTitle}>Patient app synchronized</Text>
+                  <Text style={styles.syncTitle}>
+                    {isDemoQueue
+                      ? "Portfolio demonstration"
+                      : mode === "nurse"
+                        ? "Patient apps synchronized"
+                        : "Patient app synchronized"}
+                  </Text>
                   <Text style={styles.syncCaption}>
-                    Queue position, wait estimate, and alerts use the same state
-                    as Maya’s patient view.
+                    {isDemoQueue
+                      ? "This board runs on local demonstration data. A signed-in nurse drives the same workflow through Supabase, where every transition is authorized in the database."
+                      : mode === "nurse"
+                        ? `Every transition writes queue_entries, so ${active.name.split(" ")[0]}'s live queue updates over realtime without a refresh.`
+                        : "Queue position, wait estimate, and alerts use the same state as Maya’s patient view."}
                   </Text>
                 </View>
-                <Pressable
-                  accessibilityRole="button"
-                  onPress={openPatientQueue}
-                  style={styles.previewButton}
-                >
-                  <Text style={styles.previewButtonText}>Preview</Text>
-                </Pressable>
+                {mode === "nurse" ? null : (
+                  <Pressable
+                    accessibilityRole="button"
+                    onPress={openPatientQueue}
+                    style={styles.previewButton}
+                  >
+                    <Text style={styles.previewButtonText}>Preview</Text>
+                  </Pressable>
+                )}
               </View>
             </>
           )}

@@ -1,7 +1,7 @@
 import { SymbolView } from "expo-symbols";
 import { usePathname } from "expo-router";
 import type { ComponentProps } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -16,11 +16,13 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-import { useAuth } from "@/features/auth/auth-context";
+import { type AccountRole, useAuth } from "@/features/auth/auth-context";
 import { clinqueColors as colors } from "@/features/clinics/clinque-theme";
+import { supabase } from "@/lib/supabase";
 
 type SymbolName = ComponentProps<typeof SymbolView>["name"];
 type Mode = "sign-in" | "sign-up" | "forgot-password";
+type ClinicOption = { id: string; name: string; specialty: string };
 
 function Icon({
   name,
@@ -64,6 +66,35 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [submitting, setSubmitting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [messageType, setMessageType] = useState<"error" | "success">("error");
+  const [accountRole, setAccountRole] = useState<AccountRole>("patient");
+  const [clinicId, setClinicId] = useState<string | null>(null);
+  const [clinicOptions, setClinicOptions] = useState<ClinicOption[]>([]);
+  const [clinicsLoading, setClinicsLoading] = useState(false);
+
+  // The clinic list is public (clinics are readable by anon), so the picker can
+  // load before anyone signs in.
+  useEffect(() => {
+    if (mode !== "sign-up" || accountRole !== "nurse" || clinicOptions.length)
+      return;
+
+    let active = true;
+    setClinicsLoading(true);
+
+    void supabase
+      .from("clinics")
+      .select("id, name, specialty")
+      .eq("is_active", true)
+      .order("name")
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (!error && data) setClinicOptions(data as ClinicOption[]);
+        setClinicsLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [accountRole, clinicOptions.length, mode]);
 
   if (loading) {
     return (
@@ -73,7 +104,15 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (pathname === "/reset-password" || session || isDemo) return children;
+  // Both email links land before a session exists, so they bypass the gate and
+  // establish their own session from the token in the URL.
+  if (
+    pathname === "/reset-password" ||
+    pathname === "/verify-email" ||
+    session ||
+    isDemo
+  )
+    return children;
 
   async function submit() {
     setMessage(null);
@@ -109,10 +148,16 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    if (mode === "sign-up" && accountRole === "nurse" && !clinicId) {
+      setMessageType("error");
+      setMessage("Choose the clinic you work at to register as a nurse.");
+      return;
+    }
+
     setSubmitting(true);
     const result =
       mode === "sign-up"
-        ? await signUp(fullName, email, password)
+        ? await signUp(fullName, email, password, accountRole, clinicId)
         : await signIn(email, password);
     setSubmitting(false);
 
@@ -125,7 +170,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     if (result.confirmationRequired) {
       setMessageType("success");
       setMessage(
-        "Account created. Check your email to verify your account, then return here to sign in.",
+        accountRole === "nurse"
+          ? "Nurse account created. Confirm your email, then sign in — your clinic assignment is applied on first sign-in."
+          : "Account created. Check your email to verify your account, then return here to sign in.",
       );
       setMode("sign-in");
       setPassword("");
@@ -244,19 +291,134 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
               )}
 
               {mode === "sign-up" && (
-                <Field
-                  autoComplete="name"
-                  compact={isCompact}
-                  icon={{
-                    ios: "person.fill",
-                    android: "person",
-                    web: "person",
-                  }}
-                  label="Full name"
-                  onChangeText={setFullName}
-                  placeholder="Maya Tan"
-                  value={fullName}
-                />
+                <>
+                  <View style={styles.roleBlock}>
+                    <Text
+                      style={[
+                        styles.fieldLabel,
+                        isCompact && styles.fieldLabelCompact,
+                      ]}
+                    >
+                      I am a
+                    </Text>
+                    <View style={styles.roleRow}>
+                      <RoleOption
+                        caption="Book visits and follow your queue"
+                        compact={isCompact}
+                        icon={{
+                          ios: "person.fill",
+                          android: "person",
+                          web: "person",
+                        }}
+                        label="Patient"
+                        onPress={() => {
+                          setAccountRole("patient");
+                          setClinicId(null);
+                          setMessage(null);
+                        }}
+                        selected={accountRole === "patient"}
+                      />
+                      <RoleOption
+                        caption="Run the queue at your clinic"
+                        compact={isCompact}
+                        icon={{
+                          ios: "cross.case.fill",
+                          android: "medical_services",
+                          web: "medical_services",
+                        }}
+                        label="Nurse"
+                        onPress={() => {
+                          setAccountRole("nurse");
+                          setMessage(null);
+                        }}
+                        selected={accountRole === "nurse"}
+                      />
+                    </View>
+                  </View>
+
+                  <Field
+                    autoComplete="name"
+                    compact={isCompact}
+                    icon={{
+                      ios: "person.fill",
+                      android: "person",
+                      web: "person",
+                    }}
+                    label="Full name"
+                    onChangeText={setFullName}
+                    placeholder={
+                      accountRole === "nurse" ? "Nurse Chen" : "Maya Tan"
+                    }
+                    value={fullName}
+                  />
+
+                  {accountRole === "nurse" && (
+                    <View style={styles.roleBlock}>
+                      <Text
+                        style={[
+                          styles.fieldLabel,
+                          isCompact && styles.fieldLabelCompact,
+                        ]}
+                      >
+                        Which clinic do you work at?
+                      </Text>
+                      {clinicsLoading ? (
+                        <View style={styles.clinicLoading}>
+                          <ActivityIndicator color={colors.teal} />
+                        </View>
+                      ) : clinicOptions.length ? (
+                        <View style={styles.clinicList}>
+                          {clinicOptions.map((clinic) => {
+                            const selected = clinic.id === clinicId;
+                            return (
+                              <Pressable
+                                accessibilityRole="button"
+                                key={clinic.id}
+                                onPress={() => {
+                                  setClinicId(clinic.id);
+                                  setMessage(null);
+                                }}
+                                style={[
+                                  styles.clinicOption,
+                                  selected && styles.clinicOptionSelected,
+                                ]}
+                              >
+                                <View style={styles.clinicOptionCopy}>
+                                  <Text
+                                    style={[
+                                      styles.clinicOptionName,
+                                      isCompact &&
+                                        styles.clinicOptionNameCompact,
+                                    ]}
+                                  >
+                                    {clinic.name}
+                                  </Text>
+                                  <Text style={styles.clinicOptionMeta}>
+                                    {clinic.specialty}
+                                  </Text>
+                                </View>
+                                <View
+                                  style={[
+                                    styles.clinicRadio,
+                                    selected && styles.clinicRadioSelected,
+                                  ]}
+                                >
+                                  {selected ? (
+                                    <View style={styles.clinicRadioDot} />
+                                  ) : null}
+                                </View>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <Text style={styles.clinicEmpty}>
+                          No clinics are available right now. Try again shortly.
+                        </Text>
+                      )}
+                    </View>
+                  )}
+                </>
               )}
               <Field
                 autoCapitalize="none"
@@ -387,42 +549,104 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
                 <Text style={styles.dividerText}>PORTFOLIO PREVIEW</Text>
                 <View style={styles.divider} />
               </View>
-              <Pressable
-                accessibilityRole="button"
-                onPress={continueAsDemo}
-                style={styles.demoButton}
-              >
-                <Icon
-                  name={{
-                    ios: "play.rectangle.fill",
-                    android: "preview",
-                    web: "preview",
-                  }}
-                  size={19}
-                />
-                <View style={styles.demoCopy}>
-                  <Text style={styles.demoTitle}>
-                    Explore without an account
-                  </Text>
+              {/* Two entry points so an interviewer can see both interfaces
+                  without creating an account or reaching Supabase. */}
+              <Text style={styles.demoLead}>
+                Explore without an account, using local demonstration data only.
+              </Text>
+              <View style={styles.demoRow}>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => continueAsDemo("patient")}
+                  style={styles.demoButton}
+                >
+                  <View style={styles.demoIcon}>
+                    <Icon
+                      name={{
+                        ios: "person.fill",
+                        android: "person",
+                        web: "person",
+                      }}
+                      size={19}
+                    />
+                  </View>
+                  <Text style={styles.demoTitle}>Patient view</Text>
                   <Text style={styles.demoCaption}>
-                    Use local demonstration data only
+                    Book, check in, follow the live queue
                   </Text>
-                </View>
-                <Icon
-                  name={{
-                    ios: "chevron.right",
-                    android: "chevron_right",
-                    web: "chevron_right",
-                  }}
-                  color={colors.muted}
-                  size={17}
-                />
-              </Pressable>
+                </Pressable>
+
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => continueAsDemo("nurse")}
+                  style={styles.demoButton}
+                >
+                  <View style={styles.demoIcon}>
+                    <Icon
+                      name={{
+                        ios: "cross.case.fill",
+                        android: "medical_services",
+                        web: "medical_services",
+                      }}
+                      size={19}
+                    />
+                  </View>
+                  <Text style={styles.demoTitle}>Nurse view</Text>
+                  <Text style={styles.demoCaption}>
+                    Run the clinic queue command centre
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
       </SafeAreaView>
     </View>
+  );
+}
+
+function RoleOption({
+  caption,
+  compact,
+  icon,
+  label,
+  onPress,
+  selected,
+}: {
+  caption: string;
+  compact: boolean;
+  icon: SymbolName;
+  label: string;
+  onPress: () => void;
+  selected: boolean;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.roleOption, selected && styles.roleOptionSelected]}
+    >
+      <View
+        style={[styles.roleIcon, selected && styles.roleIconSelected]}
+      >
+        <Icon
+          name={icon}
+          color={selected ? "#FFFFFF" : colors.teal}
+          size={compact ? 20 : 18}
+        />
+      </View>
+      <Text
+        style={[
+          styles.roleLabel,
+          compact && styles.roleLabelCompact,
+          selected && styles.roleLabelSelected,
+        ]}
+      >
+        {label}
+      </Text>
+      <Text style={styles.roleCaption}>{caption}</Text>
+    </Pressable>
   );
 }
 
@@ -666,6 +890,72 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
   fieldLabelCompact: { fontSize: 12 },
+  roleBlock: { gap: 9 },
+  roleRow: { flexDirection: "row", gap: 10 },
+  roleOption: {
+    flex: 1,
+    gap: 6,
+    padding: 13,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: 16,
+    backgroundColor: colors.card,
+  },
+  roleOptionSelected: {
+    borderColor: colors.teal,
+    backgroundColor: colors.tealSoft,
+  },
+  roleIcon: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: colors.tealSoft,
+  },
+  roleIconSelected: { backgroundColor: colors.teal },
+  roleLabel: { color: colors.ink, fontSize: 13, fontWeight: "800" },
+  roleLabelCompact: { fontSize: 15 },
+  roleLabelSelected: { color: colors.tealDark },
+  roleCaption: { color: colors.muted, fontSize: 10, lineHeight: 14 },
+  clinicList: { gap: 8 },
+  clinicLoading: { paddingVertical: 16, alignItems: "center" },
+  clinicOption: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    paddingVertical: 12,
+    paddingHorizontal: 13,
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: 15,
+    backgroundColor: colors.card,
+  },
+  clinicOptionSelected: {
+    borderColor: colors.teal,
+    backgroundColor: colors.tealSoft,
+  },
+  clinicOptionCopy: { flex: 1 },
+  clinicOptionName: { color: colors.ink, fontSize: 13, fontWeight: "700" },
+  clinicOptionNameCompact: { fontSize: 15 },
+  clinicOptionMeta: { marginTop: 2, color: colors.muted, fontSize: 11 },
+  clinicRadio: {
+    width: 20,
+    height: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1.5,
+    borderColor: colors.line,
+    borderRadius: 10,
+  },
+  clinicRadioSelected: { borderColor: colors.teal },
+  clinicRadioDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.teal,
+  },
+  clinicEmpty: { color: colors.muted, fontSize: 12, lineHeight: 17 },
   inputShell: {
     flexDirection: "row",
     alignItems: "center",
@@ -733,16 +1023,32 @@ const styles = StyleSheet.create({
     fontWeight: "900",
     letterSpacing: 0.8,
   },
+  demoLead: {
+    marginBottom: 9,
+    color: "#68817F",
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: "center",
+  },
+  demoRow: { flexDirection: "row", gap: 10 },
   demoButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    minHeight: 58,
-    padding: 12,
+    flex: 1,
+    gap: 7,
+    padding: 13,
+    borderWidth: 1,
+    borderColor: "#CFE9E2",
     borderRadius: 16,
     backgroundColor: colors.tealSoft,
   },
+  demoIcon: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    backgroundColor: "#FFFFFF",
+  },
   demoCopy: { flex: 1 },
-  demoTitle: { color: "#174A49", fontSize: 9, fontWeight: "800" },
-  demoCaption: { marginTop: 3, color: "#68817F", fontSize: 7 },
+  demoTitle: { color: "#174A49", fontSize: 12, fontWeight: "800" },
+  demoCaption: { marginTop: 1, color: "#68817F", fontSize: 10, lineHeight: 14 },
 });

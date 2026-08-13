@@ -44,11 +44,6 @@ export function LiveQueueScreen() {
   );
 
   function returnHome() {
-    if (Platform.OS === "web" && typeof window !== "undefined") {
-      window.location.assign("/");
-      return;
-    }
-
     router.replace("/");
   }
 
@@ -393,7 +388,7 @@ export function LiveQueueScreen() {
                 </Text>
                 <Text style={styles.demoTitle}>
                   {isDemo
-                    ? "Controlled by the staff demo"
+                    ? "Controlled by the nurse demo"
                     : "Listening for clinic updates"}
                 </Text>
               </View>
@@ -418,17 +413,12 @@ export function LiveQueueScreen() {
             <Text style={styles.demoCaption}>
               {isDemo
                 ? "Open Clinic Operations from Profile to advance the queue, begin the consultation, and complete the visit."
-                : "Your position and wait estimate update automatically. Only authorized clinic staff can advance this queue."}
+                : "Your position and wait estimate update automatically. Only authorized clinic nurse can advance this queue."}
             </Text>
             {completed && (
               <Pressable
                 accessibilityRole="button"
                 onPress={() => {
-                  if (Platform.OS === "web" && typeof window !== "undefined") {
-                    window.location.assign("/journey?tab=past");
-                    return;
-                  }
-
                   router.replace({
                     pathname: "/journey",
                     params: { tab: "past" },

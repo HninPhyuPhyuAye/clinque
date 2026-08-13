@@ -83,6 +83,8 @@ type AppointmentContextValue = {
 
 const AppointmentContext = createContext<AppointmentContextValue | null>(null);
 
+let channelSequence = 0;
+
 export function AppointmentProvider({ children }: { children: ReactNode }) {
   const { isDemo, user } = useAuth();
   const [appointment, setAppointment] = useState<Appointment | null>(null);
@@ -189,8 +191,12 @@ export function AppointmentProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!user || isDemo || !appointment) return;
 
+    // removeChannel is async, so a re-run can still find the previous channel
+    // open under the same topic. Adding a listener to a subscribed channel
+    // throws, so each subscription gets its own topic.
+    channelSequence += 1;
     const channel = supabase
-      .channel(`patient-queue-${appointment.id}`)
+      .channel(`patient-queue-${appointment.id}-${channelSequence}`)
       .on(
         "postgres_changes",
         {
