@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/features/auth/auth-context';
 import { clinics } from '@/features/clinics/clinic-data';
 import { clinqueColors as colors } from '@/features/clinics/clinque-theme';
+import { useSavedClinics } from '@/features/clinics/saved-clinics';
 import { supabase } from '@/lib/supabase';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
@@ -43,7 +44,8 @@ function Icon({ name, color = colors.teal, size = 22 }: { name: SymbolName; colo
 
 export function ProfileScreen() {
   const router = useRouter();
-  const { isDemo, signOut, user } = useAuth();
+  const { isDemo, isNurse, signOut, nurseClinic, user } = useAuth();
+  const { savedIds } = useSavedClinics();
   const [preferences, setPreferences] = useState(defaultPreferences);
   const [clinicPickerVisible, setClinicPickerVisible] = useState(false);
   const [privacyVisible, setPrivacyVisible] = useState(false);
@@ -57,7 +59,8 @@ export function ProfileScreen() {
   const authenticatedName = identity.fullName || (typeof user?.user_metadata.full_name === 'string'
     ? user.user_metadata.full_name
     : user?.email?.split('@')[0]);
-  const displayName = isDemo ? 'Maya Tan' : authenticatedName || 'Clinque patient';
+  const demoName = isNurse ? 'Nurse Chen' : 'Maya Tan';
+  const displayName = isDemo ? demoName : authenticatedName || 'Clinque patient';
   const initials = displayName
     .split(/\s+/)
     .filter(Boolean)
@@ -90,7 +93,7 @@ export function ProfileScreen() {
 
     async function loadIdentity() {
       if (!user || isDemo) {
-        setIdentity({ avatarPath: '', fullName: 'Maya Tan', phone: '+65 8123 4567' });
+        setIdentity({ avatarPath: '', fullName: demoName, phone: '+65 8123 4567' });
         setAvatarUrl(null);
         setIdentityLoading(false);
         return;
@@ -213,10 +216,6 @@ export function ProfileScreen() {
   }
 
   function openOperations() {
-    if (Platform.OS === 'web' && typeof window !== 'undefined') {
-      window.location.assign('/operations');
-      return;
-    }
     router.push('/operations');
   }
 
@@ -226,7 +225,7 @@ export function ProfileScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
           <View style={styles.header}>
             <View>
-              <Text style={styles.eyebrow}>YOUR HEALTH IDENTITY</Text>
+              <Text style={styles.eyebrow}>{isNurse ? 'CLINIC NURSE ACCOUNT' : 'YOUR HEALTH IDENTITY'}</Text>
               <Text style={styles.title}>Profile</Text>
             </View>
             <View style={styles.demoPill}>
@@ -268,44 +267,80 @@ export function ProfileScreen() {
             </View>
           </View>
 
-          <SectionHeader title="Care preferences" />
-          <View style={styles.card}>
-            <SettingsRow
-              caption={preferredClinic.specialty}
-              icon={{ ios: 'cross.case.fill', android: 'medical_services', web: 'medical_services' }}
-              iconBackground={colors.tealSoft}
-              label="Preferred clinic"
-              onPress={() => setClinicPickerVisible(true)}
-              value={preferredClinic.name}
-            />
-            <Divider />
-            <SettingsRow
-              caption="Family Medicine"
-              icon={{ ios: 'person.text.rectangle.fill', android: 'badge', web: 'badge' }}
-              iconBackground={colors.blueSoft}
-              label="Family doctor"
-              value="Dr. Sarah Lim"
-            />
-          </View>
+          {/* Care preferences, insurance and personal health records describe a
+              patient's own care. They are meaningless for a nurse account. */}
+          {isNurse ? (
+            <>
+              <SectionHeader title="Clinic assignment" />
+              <View style={styles.card}>
+                <SettingsRow
+                  caption={nurseClinic?.specialty ?? 'Clinic nurse'}
+                  icon={{ ios: 'cross.case.fill', android: 'medical_services', web: 'medical_services' }}
+                  iconBackground={colors.tealSoft}
+                  label="Assigned clinic"
+                  value={nurseClinic?.name ?? 'Unassigned'}
+                />
+                <Divider />
+                <SettingsRow
+                  caption="Queue and consultation transitions"
+                  icon={{ ios: 'person.badge.key.fill', android: 'admin_panel_settings', web: 'admin_panel_settings' }}
+                  iconBackground={colors.blueSoft}
+                  label="Access level"
+                  value="Clinic nurse"
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <SectionHeader title="Care preferences" />
+              <View style={styles.card}>
+                <SettingsRow
+                  caption={preferredClinic.specialty}
+                  icon={{ ios: 'cross.case.fill', android: 'medical_services', web: 'medical_services' }}
+                  iconBackground={colors.tealSoft}
+                  label="Preferred clinic"
+                  onPress={() => setClinicPickerVisible(true)}
+                  value={preferredClinic.name}
+                />
+                <Divider />
+                <SettingsRow
+                  caption="Family Medicine"
+                  icon={{ ios: 'person.text.rectangle.fill', android: 'badge', web: 'badge' }}
+                  iconBackground={colors.blueSoft}
+                  label="Family doctor"
+                  value="Dr. Sarah Lim"
+                />
+                <Divider />
+                <SettingsRow
+                  caption={savedIds.length ? 'Tap the heart on any clinic to update' : 'Tap the heart on a clinic to save it'}
+                  icon={{ ios: 'heart.fill', android: 'favorite', web: 'favorite' }}
+                  iconBackground={colors.warmSoft}
+                  label="Saved clinics"
+                  onPress={() => router.push('/explore')}
+                  value={savedIds.length === 1 ? '1 clinic' : `${savedIds.length} clinics`}
+                />
+              </View>
 
-          <SectionHeader title="Coverage & records" />
-          <View style={styles.card}>
-            <SettingsRow
-              caption="Add a policy for faster registration"
-              icon={{ ios: 'shield.lefthalf.filled', android: 'health_and_safety', web: 'health_and_safety' }}
-              iconBackground={colors.warmSoft}
-              label="Insurance"
-              value="Not connected"
-            />
-            <Divider />
-            <SettingsRow
-              caption="2 visits · 1 document"
-              icon={{ ios: 'folder.fill', android: 'folder', web: 'folder' }}
-              iconBackground={colors.tealSoft}
-              label="Health records"
-              value="Clinque history"
-            />
-          </View>
+              <SectionHeader title="Coverage & records" />
+              <View style={styles.card}>
+                <SettingsRow
+                  caption="Add a policy for faster registration"
+                  icon={{ ios: 'shield.lefthalf.filled', android: 'health_and_safety', web: 'health_and_safety' }}
+                  iconBackground={colors.warmSoft}
+                  label="Insurance"
+                  value="Not connected"
+                />
+                <Divider />
+                <SettingsRow
+                  caption="2 visits · 1 document"
+                  icon={{ ios: 'folder.fill', android: 'folder', web: 'folder' }}
+                  iconBackground={colors.tealSoft}
+                  label="Health records"
+                  value="Clinque history"
+                />
+              </View>
+            </>
+          )}
 
           <SectionHeader title="Notifications & security" />
           <View style={styles.card}>
@@ -331,23 +366,35 @@ export function ProfileScreen() {
             />
           </View>
 
-          <Pressable
-            accessibilityLabel="Open clinic operations demo"
-            accessibilityRole="button"
-            onPress={openOperations}
-            style={({ pressed }) => [styles.operationsCard, pressed && styles.operationsCardPressed]}>
-            <View style={styles.operationsIcon}>
-              <Icon name={{ ios: 'chart.bar.xaxis', android: 'monitoring', web: 'monitoring' }} color="#E9FAF6" size={23} />
-            </View>
-            <View style={styles.operationsContent}>
-              <View style={styles.operationsTitleRow}>
-                <Text style={styles.operationsTitle}>Clinic operations demo</Text>
-                <View style={styles.staffPill}><Text style={styles.staffPillText}>STAFF PORTAL</Text></View>
+          {/* Nurses see their real clinic; demo mode keeps the portfolio walkthrough.
+              A signed-in patient is not offered a queue they cannot drive. */}
+          {isNurse || isDemo ? (
+            <Pressable
+              accessibilityLabel={isNurse ? 'Open clinic operations' : 'Open clinic operations demo'}
+              accessibilityRole="button"
+              onPress={openOperations}
+              style={({ pressed }) => [styles.operationsCard, pressed && styles.operationsCardPressed]}>
+              <View style={styles.operationsIcon}>
+                <Icon name={{ ios: 'chart.bar.xaxis', android: 'monitoring', web: 'monitoring' }} color="#E9FAF6" size={23} />
               </View>
-              <Text style={styles.operationsCaption}>Run the live clinic queue and see patient updates synchronize instantly.</Text>
-            </View>
-            <Icon name={{ ios: 'arrow.up.right', android: 'north_east', web: 'north_east' }} color="#9DE1D1" size={18} />
-          </Pressable>
+              <View style={styles.operationsContent}>
+                <View style={styles.operationsTitleRow}>
+                  <Text style={styles.operationsTitle}>
+                    {isNurse ? 'Clinic operations' : 'Clinic operations demo'}
+                  </Text>
+                  <View style={styles.nursePill}>
+                    <Text style={styles.nursePillText}>{isNurse ? 'NURSE' : 'NURSE DEMO'}</Text>
+                  </View>
+                </View>
+                <Text style={styles.operationsCaption}>
+                  {isNurse && nurseClinic
+                    ? `Drive the live queue at ${nurseClinic.name} and watch patient views update instantly.`
+                    : 'Run the live clinic queue and see patient updates synchronize instantly.'}
+                </Text>
+              </View>
+              <Icon name={{ ios: 'arrow.up.right', android: 'north_east', web: 'north_east' }} color="#9DE1D1" size={18} />
+            </Pressable>
+          ) : null}
 
           <Pressable accessibilityRole="button" onPress={() => void signOut()} style={styles.signOutButton}>
             <Icon name={{ ios: 'rectangle.portrait.and.arrow.right', android: 'logout', web: 'logout' }} color="#9B3E38" size={18} />
@@ -746,8 +793,8 @@ const styles = StyleSheet.create({
   operationsTitleRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 7 },
   operationsTitle: { color: '#FFFFFF', fontSize: 11, fontWeight: '800' },
   operationsCaption: { marginTop: 5, color: '#C7E6E0', fontSize: 8, lineHeight: 12 },
-  staffPill: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(157,225,209,0.16)' },
-  staffPillText: { color: '#9DE1D1', fontSize: 6, fontWeight: '900', letterSpacing: 0.6 },
+  nursePill: { paddingHorizontal: 7, paddingVertical: 4, borderRadius: 8, backgroundColor: 'rgba(157,225,209,0.16)' },
+  nursePillText: { color: '#9DE1D1', fontSize: 6, fontWeight: '900', letterSpacing: 0.6 },
   signOutButton: { flexDirection: 'row', alignItems: 'center', gap: 11, marginTop: 12, padding: 15, borderWidth: 1, borderColor: '#F0D8D5', borderRadius: 19, backgroundColor: '#FFF7F6' },
   signOutCopy: { flex: 1 },
   signOutTitle: { color: '#873C37', fontSize: 10, fontWeight: '800' },

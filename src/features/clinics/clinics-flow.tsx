@@ -20,6 +20,7 @@ import {
   visitReasons,
 } from './clinic-data';
 import { clinqueColors as colors } from './clinque-theme';
+import { useSavedClinics } from './saved-clinics';
 
 type SymbolName = ComponentProps<typeof SymbolView>['name'];
 
@@ -302,6 +303,8 @@ export function ClinicsFlow() {
 
 function ClinicCard({ clinic, onSelect }: { clinic: Clinic; onSelect: () => void }) {
   const accent = getAccent(clinic.accent);
+  const { isSaved, toggleSaved } = useSavedClinics();
+  const saved = isSaved(clinic.id);
 
   return (
     <View style={styles.clinicCard}>
@@ -334,8 +337,19 @@ function ClinicCard({ clinic, onSelect }: { clinic: Clinic; onSelect: () => void
           </View>
         </Pressable>
 
-        <Pressable accessibilityLabel={`Save ${clinic.name}`} style={styles.favouriteButton}>
-          <Icon name={{ ios: 'heart', android: 'favorite_border', web: 'favorite_border' }} color="#91A4A6" size={21} />
+        <Pressable
+          accessibilityLabel={saved ? `Remove ${clinic.name} from saved clinics` : `Save ${clinic.name}`}
+          accessibilityRole="button"
+          accessibilityState={{ selected: saved }}
+          onPress={() => void toggleSaved(clinic.id)}
+          style={styles.favouriteButton}>
+          <Icon
+            name={saved
+              ? { ios: 'heart.fill', android: 'favorite', web: 'favorite' }
+              : { ios: 'heart', android: 'favorite_border', web: 'favorite_border' }}
+            color={saved ? '#C2453F' : '#91A4A6'}
+            size={21}
+          />
         </Pressable>
       </View>
 
@@ -365,6 +379,8 @@ function ClinicDetail({
   onBack: () => void;
   onChooseTime: () => void;
 }) {
+  const { isSaved, toggleSaved } = useSavedClinics();
+  const saved = isSaved(clinic.id);
   const accent = getAccent(clinic.accent);
 
   return (
@@ -376,8 +392,19 @@ function ClinicDetail({
               <Icon name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} color={colors.ink} size={21} />
             </Pressable>
             <Text style={styles.detailNavigationTitle}>Clinic details</Text>
-            <Pressable accessibilityLabel={`Save ${clinic.name}`} style={styles.backButton}>
-              <Icon name={{ ios: 'heart', android: 'favorite_border', web: 'favorite_border' }} color={colors.ink} size={20} />
+            <Pressable
+              accessibilityLabel={saved ? `Remove ${clinic.name} from saved clinics` : `Save ${clinic.name}`}
+              accessibilityRole="button"
+              accessibilityState={{ selected: saved }}
+              onPress={() => void toggleSaved(clinic.id)}
+              style={styles.backButton}>
+              <Icon
+                name={saved
+                  ? { ios: 'heart.fill', android: 'favorite', web: 'favorite' }
+                  : { ios: 'heart', android: 'favorite_border', web: 'favorite_border' }}
+                color={saved ? '#C2453F' : colors.ink}
+                size={20}
+              />
             </Pressable>
           </View>
 
