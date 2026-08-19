@@ -4,6 +4,15 @@ A cross-platform clinic journey and queue-management app. Patients discover a cl
 
 **Stack** — Expo SDK 57 · React Native 0.86 · React 19 · TypeScript · Expo Router · Supabase (Auth, PostgreSQL, Realtime, Row Level Security, private Storage)
 
+## Live demo
+
+| | |
+|---|---|
+| 🌐 **Web demo** | **[hninphyuphyuaye.github.io/clinque](https://hninphyuphyuaye.github.io/clinque/)** — runs in any modern browser |
+| 📱 **Android APK** | **[Download from the latest release](https://github.com/HninPhyuPhyuAye/clinque/releases/latest)** — install on an Android device or emulator |
+
+No account needed: the sign-in screen's **Portfolio preview** opens either interface on local demonstration data. **Patient view** books, checks in and follows the live queue. **Nurse view** is the clinic-side admin panel — the queue command centre with the full *advance → start consultation → complete* lifecycle.
+
 ---
 
 ## The problem
@@ -276,12 +285,11 @@ A few decisions worth explaining:
 
 Stated plainly rather than left to be discovered:
 
-- **Native builds are unverified.** The web build runs and has been tested on iOS Safari and Android Chrome. No iOS or Android native build has been produced — Xcode is not installed on the development machine, and the installed Expo Go does not accept an SDK 57 project. The native tab shell has never been executed.
+- **The iOS native build is unverified.** The Android release APK is built from this repository and smoke-tested on an Android 15 emulator (sign-in, both portfolio previews, the nurse queue board). No iOS native build has been produced — Xcode is not installed on the development machine.
 - **No automated test suite.** Validation is TypeScript, Expo Doctor, and manual flows.
 - **Visit history is device-local.** `visitHistory` persists to AsyncStorage even for authenticated users, so completed visits do not follow an account across devices. A `visits` table is the natural next step.
 - **Some clinic detail is presentational.** Room number, shift, and doctor assignment are fixed values rather than scheduled data.
 - **Nurse sign-up is self-service.** See the tradeoff note above.
-- **No deployment yet.** There is no public URL; the app runs from a local Expo dev server.
 
 ## Licence
 
