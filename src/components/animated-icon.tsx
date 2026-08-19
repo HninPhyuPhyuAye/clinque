@@ -1,6 +1,6 @@
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
@@ -11,6 +11,13 @@ const DURATION = 600;
 export function AnimatedSplashOverlay() {
   const [animate, setAnimate] = useState(false);
   const [visible, setVisible] = useState(true);
+
+  // Fail-safe: the entering callback is the only other unmount path, and it
+  // must not be able to strand the overlay over the whole app.
+  useEffect(() => {
+    const failSafe = setTimeout(() => setVisible(false), 2500);
+    return () => clearTimeout(failSafe);
+  }, []);
 
   if (!visible) return null;
 

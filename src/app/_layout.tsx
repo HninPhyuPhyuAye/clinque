@@ -21,13 +21,15 @@ export default function TabLayout() {
           <AppointmentProvider>
             <NotificationProvider>
               <NurseQueueProvider>
-                <AnimatedSplashOverlay />
                 <AppTabs />
               </NurseQueueProvider>
             </NotificationProvider>
           </AppointmentProvider>
         </AuthGate>
       </AuthProvider>
+      {/* Above AuthGate: the signed-out branch never renders children, so the
+          splash would never be dismissed if this lived inside the gate. */}
+      <AnimatedSplashOverlay />
     </ThemeProvider>
   );
 }
